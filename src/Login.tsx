@@ -22,13 +22,21 @@ export default function Login() {
         setAuthState('loading');
         setError(null);
         
+        // First, check if we're already authenticated (from localStorage)
+        if (isAuthenticated()) {
+          console.log('Found existing authentication tokens');
+          setAuthState('authenticated');
+          setUserInfo(getUserInfo());
+          return;
+        }
+        
         // Initialize Keycloak
         const authenticated = await initKeycloak();
         
         if (!mounted) return;
         
         if (authenticated) {
-          console.log('User is authenticated');
+          console.log('User is authenticated after init');
           setAuthState('authenticated');
           setUserInfo(getUserInfo());
         } else {
@@ -47,9 +55,15 @@ export default function Login() {
     // Listen for auth completion events
     const handleAuthComplete = () => {
       console.log('Auth complete event received in Login component');
+      console.log('Current authentication state:', isAuthenticated());
+      console.log('Current user info:', getUserInfo());
+      
       if (mounted && isAuthenticated()) {
+        console.log('Setting auth state to authenticated');
         setAuthState('authenticated');
         setUserInfo(getUserInfo());
+      } else {
+        console.log('Auth complete event received but user is not authenticated');
       }
     };
     
@@ -61,8 +75,24 @@ export default function Login() {
       }
     };
     
+    // Listen for storage changes (for when auth completes in same window)
+    const handleStorageChange = (e: StorageEvent) => {
+      console.log('Storage event received:', e.key, e.newValue);
+      if (e.key === 'auth-status' && e.newValue === 'authenticated') {
+        console.log('Auth status changed via storage event');
+        console.log('Current authentication state:', isAuthenticated());
+        
+        if (mounted && isAuthenticated()) {
+          console.log('Setting auth state to authenticated via storage event');
+          setAuthState('authenticated');
+          setUserInfo(getUserInfo());
+        }
+      }
+    };
+    
     window.addEventListener('auth-complete', handleAuthComplete);
     window.addEventListener('auth-failed', handleAuthFailed);
+    window.addEventListener('storage', handleStorageChange);
     
     initAuth();
     
@@ -71,6 +101,7 @@ export default function Login() {
       mounted = false;
       window.removeEventListener('auth-complete', handleAuthComplete);
       window.removeEventListener('auth-failed', handleAuthFailed);
+      window.removeEventListener('storage', handleStorageChange);
       cleanupKeycloak();
     };
   }, []);

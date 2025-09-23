@@ -32,8 +32,14 @@ export function clearAuth() {
   
   // Clear any stored tokens from localStorage
   if (typeof window !== 'undefined') {
+    localStorage.removeItem('kc-token');
+    localStorage.removeItem('kc-refresh-token');
+    localStorage.removeItem('kc-id-token');
+    localStorage.removeItem('kc-authenticated');
     localStorage.removeItem('kc-callback-' + ENV.KC_REALM);
     localStorage.removeItem('kc-callback');
+    localStorage.removeItem('auth-status');
+    
     // Clear any other Keycloak related storage
     const keys = Object.keys(localStorage);
     keys.forEach(key => {
@@ -116,6 +122,14 @@ const handleOAuthCallback = (url: string): Promise<boolean> => {
           console.warn('Could not parse token:', e);
         }
         
+        // Persist tokens to localStorage for page reloads
+        localStorage.setItem('kc-token', data.access_token);
+        localStorage.setItem('kc-refresh-token', data.refresh_token);
+        if (data.id_token) {
+          localStorage.setItem('kc-id-token', data.id_token);
+        }
+        localStorage.setItem('kc-authenticated', 'true');
+        
         // Set up token refresh
         if (data.expires_in) {
           (keycloak as any).tokenTimeoutHandle = setTimeout(() => {
@@ -124,6 +138,19 @@ const handleOAuthCallback = (url: string): Promise<boolean> => {
         }
         
         console.log('Authentication completed successfully');
+        
+        // Trigger a storage event to notify other parts of the app
+        console.log('Setting auth-status to authenticated in localStorage');
+        localStorage.setItem('auth-status', 'authenticated');
+        window.dispatchEvent(new StorageEvent('storage', {
+          key: 'auth-status',
+          newValue: 'authenticated',
+          storageArea: localStorage
+        }));
+        
+        console.log('Dispatching auth-complete custom event');
+        window.dispatchEvent(new CustomEvent('auth-complete'));
+        
         resolve(true);
       })
       .catch(error => {
@@ -141,15 +168,41 @@ const handleOAuthCallback = (url: string): Promise<boolean> => {
 export async function initKeycloak(): Promise<boolean> {
   const keycloak = getKeycloak();
 
-  // Always clear auth state first to ensure fresh login
-  clearAuth();
-
   if (initPromise) return initPromise;
 
   console.log('Initializing Keycloak authentication...');
+  
+  // First, check if we already have valid tokens
+  if (isAuthenticated()) {
+    console.log('Already authenticated with valid tokens');
+    return Promise.resolve(true);
+  }
+
+  // Always clear auth state first to ensure fresh login (only if not authenticated)
+  clearAuth();
 
   // Set up protocol callback handler for Electron
   if (isElectron()) {
+    // Check for any pending OAuth callback first
+    window.electronAPI.getPendingOAuthCallback().then(async (pendingUrl) => {
+      if (pendingUrl) {
+        console.log('Found pending OAuth callback:', pendingUrl);
+        try {
+          const authenticated = await handleOAuthCallback(pendingUrl);
+          if (authenticated) {
+            console.log('Pending OAuth callback processed successfully');
+            window.dispatchEvent(new CustomEvent('auth-complete'));
+          }
+        } catch (error) {
+          console.error('Failed to process pending OAuth callback:', error);
+          window.dispatchEvent(new CustomEvent('auth-failed', { detail: error }));
+        }
+      }
+    }).catch(error => {
+      console.error('Failed to get pending OAuth callback:', error);
+    });
+    
+    // Set up regular callback handler for future callbacks
     window.electronAPI.onOAuthCallback(async (url: string) => {
       try {
         const authenticated = await handleOAuthCallback(url);
@@ -223,12 +276,14 @@ export async function login(): Promise<void> {
       
       const authUrl = `${ENV.KC_URL}/realms/${ENV.KC_REALM}/protocol/openid-connect/auth?${authParams.toString()}`;
       
-      console.log('Opening auth URL in system browser:', authUrl);
+      console.log('Navigating to auth URL in current window:', authUrl);
       
-      // Open the authentication URL in the system browser
-      await window.electronAPI.openExternal(authUrl);
+      // Load the authentication URL directly in the current window
+      window.location.href = authUrl;
+      
     } catch (error) {
-      console.error('Error opening login URL:', error);
+      console.error('Error during authentication:', error);
+      window.dispatchEvent(new CustomEvent('auth-failed', { detail: error }));
       throw error;
     }
   } else {
@@ -252,10 +307,49 @@ function generateRandomString(length: number): string {
   return result;
 }
 
+// Function to restore authentication from localStorage
+function restoreAuthFromStorage(): boolean {
+  if (typeof window === 'undefined') return false;
+  
+  const token = localStorage.getItem('kc-token');
+  const refreshToken = localStorage.getItem('kc-refresh-token');
+  const idToken = localStorage.getItem('kc-id-token');
+  const authenticated = localStorage.getItem('kc-authenticated');
+  
+  if (token && authenticated === 'true') {
+    console.log('Restoring authentication from localStorage');
+    const keycloak = getKeycloak();
+    (keycloak as any).token = token;
+    (keycloak as any).refreshToken = refreshToken;
+    (keycloak as any).idToken = idToken;
+    (keycloak as any).authenticated = true;
+    
+    // Parse the token to get user info
+    try {
+      (keycloak as any).tokenParsed = JSON.parse(atob(token.split('.')[1]));
+    } catch (e) {
+      console.warn('Could not parse stored token:', e);
+      clearAuth();
+      return false;
+    }
+    
+    return true;
+  }
+  
+  return false;
+}
+
 // Check if user is authenticated
 export function isAuthenticated(): boolean {
   const keycloak = getKeycloak();
-  return !!(keycloak as any).authenticated && !!(keycloak as any).token;
+  
+  // First check current instance
+  if ((keycloak as any).authenticated && (keycloak as any).token) {
+    return true;
+  }
+  
+  // If not authenticated, try to restore from localStorage
+  return restoreAuthFromStorage();
 }
 
 // Get current user info

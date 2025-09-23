@@ -33,9 +33,31 @@ const createWindow = () => {
     mainWindow = null;
   });
 
+  // Intercept navigation to handle OAuth callback
+  mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {
+    console.log('Navigation intercepted:', navigationUrl);
+    const url = new URL(navigationUrl);
+    
+    // Check if this is our custom protocol callback
+    if (url.protocol === 'vox-app:') {
+      console.log('Custom protocol detected, preventing default navigation');
+      event.preventDefault();
+      
+      // Process the callback immediately before navigation
+      handleProtocol(navigationUrl);
+      
+      // Don't navigate back immediately - let the callback handler do it
+      // The callback processing will trigger the navigation after tokens are saved
+    }
+  });
+
   // Handle external links - open in system browser instead of in app
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     if (url.startsWith('http://') || url.startsWith('https://')) {
+      // Don't open external links if they're part of the auth flow
+      if (url.includes('login-t.pi-labs.ai') || url.includes('auth/realms')) {
+        return { action: 'allow' }; // Allow Keycloak pages to load in the app
+      }
       shell.openExternal(url);
     }
     return { action: 'deny' };
@@ -52,40 +74,51 @@ const createWindow = () => {
   mainWindow.webContents.openDevTools();
 };
 
+
+let pendingOAuthCallback: string | null = null;
+
 // Handle protocol for OAuth callback
 const handleProtocol = (url: string) => {
   console.log('Handling protocol URL:', url);
   
   if (url.startsWith('vox-app://auth/callback')) {
+    console.log('OAuth callback URL detected');
+    
+    // Store the callback URL for processing after navigation
+    pendingOAuthCallback = url;
+    
     // If no main window exists, create one
     if (!mainWindow) {
       console.log('No main window exists, creating one...');
       createWindow();
+      return;
     }
     
-    // Wait a bit for the window to be ready and then send the callback
-    if (mainWindow && !mainWindow.isDestroyed()) {
-      // If window is ready, send immediately
-      if (mainWindow.webContents.isLoading()) {
-        mainWindow.webContents.once('did-finish-load', () => {
-          if (mainWindow && !mainWindow.isDestroyed()) {
-            console.log('Sending oauth-callback to renderer:', url);
-            mainWindow.webContents.send('oauth-callback', url);
-          }
-        });
-      } else {
-        console.log('Sending oauth-callback to renderer:', url);
-        mainWindow.webContents.send('oauth-callback', url);
-      }
-      
-      // Focus the window
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore();
-      }
-      mainWindow.focus();
-    } else {
-      console.error('Main window is destroyed or null, cannot send oauth-callback');
+    // Ensure window exists and is not destroyed
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      console.error('Main window is destroyed or null, cannot process callback');
+      return;
     }
+    
+    console.log('Navigating to main app with pending callback');
+    
+    // Navigate to the main app first
+    if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+      mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    } else {
+      mainWindow.loadFile(
+        path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)
+      );
+    }
+    
+    // Focus and restore window
+    if (mainWindow.isMinimized()) {
+      mainWindow.restore();
+    }
+    mainWindow.focus();
+    
+  } else {
+    console.log('URL is not an OAuth callback, ignoring');
   }
 };
 
@@ -135,14 +168,17 @@ if (process.platform === 'win32' || process.platform === 'linux') {
 app.on('ready', () => {
   createWindow();
   
-  // Set up IPC handlers
+  // Handle opening external URLs
   ipcMain.handle('open-external', async (event, url: string) => {
-    try {
-      await shell.openExternal(url);
-    } catch (error) {
-      console.error('Failed to open external URL:', error);
-      throw error;
-    }
+    await shell.openExternal(url);
+  });
+  
+  // Handle getting pending OAuth callback
+  ipcMain.handle('get-pending-oauth-callback', async () => {
+    console.log('Renderer requesting pending OAuth callback:', pendingOAuthCallback);
+    const callback = pendingOAuthCallback;
+    pendingOAuthCallback = null; // Clear it after providing
+    return callback;
   });
 });
 

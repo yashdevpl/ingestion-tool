@@ -11,6 +11,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     ipcRenderer.removeAllListeners('oauth-callback');
   },
   openExternal: (url: string) => {
-    ipcRenderer.invoke('open-external', url);
+    return ipcRenderer.invoke('open-external', url);
+  },
+  getPendingOAuthCallback: () => {
+    return ipcRenderer.invoke('get-pending-oauth-callback');
   }
 });
