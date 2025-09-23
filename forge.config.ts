@@ -47,10 +47,23 @@ if (process.env.NODE_ENV === "production") {
 
 const config: ForgeConfig = {
   packagerConfig: {
+    protocols: [
+      {
+        name: "Vox Tool",
+        schemes: ["vox-app"],
+      },
+    ],
     asar: true,
   },
   rebuildConfig: {},
+
   makers: [
+    {
+      name: "@electron-forge/maker-deb",
+      config: {
+        mimeType: ["x-scheme-handler/vox-app"],
+      },
+    },
     new MakerSquirrel({}),
     new MakerZIP({}, ["darwin"]),
     new MakerRpm({}),

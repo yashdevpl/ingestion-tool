@@ -1,9 +1,73 @@
 {
-  "name": "vox-ingestion-tool",
-  "productName": "vox-ingestion-tool",
+  "name": "vox-app",
+  "productName": "vox-app",
   "version": "1.0.0",
   "description": "My Electron application description",
   "main": ".vite/build/main.js",
+  "schemes": [
+    "vox-app"
+  ],
+  "build": {
+    "appId": "com.yourcompany.voxapp",
+    "productName": "VOX App",
+    "directories": {
+      "output": "dist"
+    },
+    "protocols": [
+      {
+        "name": "VOX App Protocol",
+        "schemes": [
+          "vox-app"
+        ]
+      }
+    ],
+    "win": {
+      "target": "nsis",
+      "icon": "assets/icon.ico",
+      "protocols": [
+        {
+          "name": "VOX App Protocol",
+          "schemes": [
+            "vox-app"
+          ]
+        }
+      ]
+    },
+    "mac": {
+      "target": "dmg",
+      "icon": "assets/icon.icns",
+      "protocols": [
+        {
+          "name": "VOX App Protocol",
+          "schemes": [
+            "vox-app"
+          ]
+        }
+      ]
+    },
+    "linux": {
+      "target": "AppImage",
+      "icon": "assets/icon.png",
+      "protocols": [
+        {
+          "name": "VOX App Protocol",
+          "schemes": [
+            "vox-app"
+          ]
+        }
+      ]
+    }
+  },
+  "nsis": {
+    "oneClick": false,
+    "allowElevation": true,
+    "allowToChangeInstallationDirectory": true,
+    "installerIcon": "assets/icon.ico",
+    "uninstallerIcon": "assets/icon.ico",
+    "installerHeaderIcon": "assets/icon.ico",
+    "createDesktopShortcut": true,
+    "createStartMenuShortcut": true
+  },
   "scripts": {
     "start": "electron-forge start",
     "package": "electron-forge package",
@@ -67,6 +131,7 @@
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "concurrently": "^9.2.1",
+    "dotenv": "^17.2.2",
     "electron-squirrel-startup": "^1.0.1",
     "formik": "^2.4.6",
     "framer-motion": "^12.23.16",
