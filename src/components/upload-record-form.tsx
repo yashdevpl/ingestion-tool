@@ -816,7 +816,7 @@ const UploadRecordForm: React.FC = () => {
 
           try {
             const callsResponse = await axios.post(
-              "http://localhost:3000/api/ingestion",
+              "http://192.168.1.12:3000/api/ingestion",
               formDataCalls,
               config
             );
@@ -855,7 +855,7 @@ const UploadRecordForm: React.FC = () => {
 
           try {
             const smsResponse = await axios.post(
-              "http://localhost:3000/api/ingestion/sms",
+              "http://192.168.1.12:3000/api/ingestion/sms",
               formDataSms,
               config
             );
@@ -958,8 +958,8 @@ const UploadRecordForm: React.FC = () => {
                     try {
                       const endpoint =
                         requestInfo?.fileType === "sms"
-                          ? `http://localhost:3000/api/ingestion/status/${requestInfo.requestId}/sms`
-                          : `http://localhost:3000/api/ingestion/status/${requestInfo.requestId}`;
+                          ? `http://192.168.1.12:3000/api/ingestion/status/${requestInfo.requestId}/sms`
+                          : `http://192.168.1.12:3000/api/ingestion/status/${requestInfo.requestId}`;
 
                       const statusResponse = await axios.get(endpoint);
                       console.log(

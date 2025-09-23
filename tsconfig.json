@@ -1,16 +1,13 @@
 {
   "compilerOptions": {
-    "target": "ESNext",
-    "module": "commonjs",
-    "allowJs": true,
-    "skipLibCheck": true,
+    "target": "ES2020",
+    "module": "ESNext",
+    "moduleResolution": "bundler", // <--- important
     "esModuleInterop": true,
-    "noImplicitAny": true,
-    "sourceMap": true,
-    "baseUrl": ".",
-    "outDir": "dist",
-    "moduleResolution": "node",
-    "resolveJsonModule": true,
-    "jsx": "react-jsx"
+    "allowSyntheticDefaultImports": true,
+    "strict": true,
+    "skipLibCheck": true, // optional but helps with type errors
+    "forceConsistentCasingInFileNames": true,
+    "jsx": "react-jsx" // if using React
   }
 }
