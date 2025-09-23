@@ -8,6 +8,7 @@
     "strict": true,
     "skipLibCheck": true, // optional but helps with type errors
     "forceConsistentCasingInFileNames": true,
-    "jsx": "react-jsx" // if using React
+    "jsx": "react-jsx", // if using React
+    "types": ["vite/client"]
   }
 }
