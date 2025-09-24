@@ -178,11 +178,17 @@ export async function initKeycloak(): Promise<boolean> {
     return Promise.resolve(true);
   }
 
-  // Always clear auth state first to ensure fresh login (only if not authenticated)
+  // Clear auth state only if not already authenticated
   clearAuth();
 
   // Set up protocol callback handler for Electron
   if (isElectron()) {
+    // Set up handler to clear auth when window closes
+    window.electronAPI.onClearAuthOnClose(() => {
+      console.log('Window closing, clearing authentication state...');
+      clearAuth();
+    });
+    
     // Check for any pending OAuth callback first
     window.electronAPI.getPendingOAuthCallback().then(async (pendingUrl) => {
       if (pendingUrl) {
@@ -375,6 +381,7 @@ export async function logout(): Promise<void> {
 export function cleanupKeycloak() {
   if (isElectron()) {
     window.electronAPI.removeOAuthListener();
+    window.electronAPI.removeClearAuthListener();
   }
   
   const keycloak = getKeycloak();

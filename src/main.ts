@@ -32,6 +32,15 @@ const createWindow = () => {
   mainWindow.on('closed', () => {
     mainWindow = null;
   });
+  
+  // Clear authentication when window is about to close
+  mainWindow.on('close', () => {
+    console.log('Main window closing, clearing authentication...');
+    // Send message to renderer to clear auth before window closes
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('clear-auth-on-close');
+    }
+  });
 
   // Intercept navigation to handle OAuth callback
   mainWindow.webContents.on('will-navigate', (event, navigationUrl) => {

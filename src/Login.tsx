@@ -1,5 +1,5 @@
 import { StrictMode, useEffect, useState } from "react";
-import { initKeycloak, cleanupKeycloak, login, isAuthenticated, getUserInfo } from "./auth/keycloak";
+import { initKeycloak, cleanupKeycloak, login, isAuthenticated, getUserInfo, logout, clearAuth } from "./auth/keycloak";
 import LoginLoader from "./components/LoginLoader";
 import { FiltersProvider } from "./context/filters-context";
 import { UploadStatusProvider } from "./context/upload-status-context";
@@ -94,6 +94,14 @@ export default function Login() {
     window.addEventListener('auth-failed', handleAuthFailed);
     window.addEventListener('storage', handleStorageChange);
     
+    // Add beforeunload event to clear auth when window closes (fallback)
+    const handleBeforeUnload = () => {
+      console.log('Window unloading, clearing authentication...');
+      clearAuth();
+    };
+    
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    
     initAuth();
     
     // Cleanup function
@@ -102,6 +110,7 @@ export default function Login() {
       window.removeEventListener('auth-complete', handleAuthComplete);
       window.removeEventListener('auth-failed', handleAuthFailed);
       window.removeEventListener('storage', handleStorageChange);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
       cleanupKeycloak();
     };
   }, []);
@@ -135,6 +144,20 @@ export default function Login() {
       setAuthState('error');
       setError(err instanceof Error ? err.message : 'Authentication failed');
     });
+  };
+
+  const handleLogout = async () => {
+    try {
+      setAuthState('loading');
+      await logout();
+      setAuthState('unauthenticated');
+      setUserInfo(null);
+    } catch (err) {
+      console.error('Logout failed:', err);
+      // Even if logout fails, clear the local state
+      setAuthState('unauthenticated');
+      setUserInfo(null);
+    }
   };
 
   // Show loading state
@@ -199,6 +222,33 @@ export default function Login() {
   // Show authenticated app
   return (
     <div>
+      {/* Header with user info and logout */}
+      <div className="bg-white shadow-sm border-b">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center py-3">
+            <div className="flex items-center">
+              <h1 className="text-lg font-semibold text-gray-900">VOX App - Data Ingestion</h1>
+            </div>
+            <div className="flex items-center space-x-4">
+              {userInfo && (
+                <div className="text-sm text-gray-600">
+                  Welcome, <span className="font-medium">{userInfo.preferred_username || userInfo.name || 'User'}</span>
+                </div>
+              )}
+              <Button
+                onClick={handleLogout}
+                variant="outline"
+                size="sm"
+                className="text-gray-600 hover:text-gray-900"
+              >
+                Logout
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      {/* Main app content */}
       <StrictMode>
         <FiltersProvider>
           <UploadStatusProvider>

@@ -15,5 +15,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   getPendingOAuthCallback: () => {
     return ipcRenderer.invoke('get-pending-oauth-callback');
+  },
+  onClearAuthOnClose: (callback: () => void) => {
+    ipcRenderer.on('clear-auth-on-close', callback);
+  },
+  removeClearAuthListener: () => {
+    ipcRenderer.removeAllListeners('clear-auth-on-close');
   }
 });

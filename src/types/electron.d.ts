@@ -3,6 +3,8 @@ export interface ElectronAPI {
   removeOAuthListener: () => void;
   openExternal: (url: string) => Promise<void>;
   getPendingOAuthCallback: () => Promise<string | null>;
+  onClearAuthOnClose: (callback: () => void) => void;
+  removeClearAuthListener: () => void;
 }
 
 declare global {
