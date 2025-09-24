@@ -12,10 +12,9 @@ import { useEffect, useRef, useState } from "react";
 
 import { cn } from "../lib/utils";
 
+import { FileUploadStatus } from "./file-upload-status";
 import { Button } from "./ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "./ui/dialog";
-import { UserNav } from "./side-nav-account";
-import { FileUploadStatus } from "./file-upload-status";
 
 const COMPACT_WIDTH_THRESHOLD = 768;
 
@@ -162,15 +161,13 @@ export const AppHeader = () => {
           <Button variant="outline" size="icon" className="rounded-lg">
             <Info className="text-muted-foreground" />
           </Button>
-          <UserNav>
-            <Button
-              variant="secondary"
-              size="icon"
-              className="rounded-lg bg-blue-100 text-xs font-medium text-blue-600 hover:bg-blue-200"
-            >
-              J
-            </Button>
-          </UserNav>
+          <Button
+            variant="secondary"
+            size="icon"
+            className="rounded-lg bg-blue-100 text-xs font-medium text-blue-600 hover:bg-blue-200"
+          >
+            J
+          </Button>
         </div>
       </div>
 

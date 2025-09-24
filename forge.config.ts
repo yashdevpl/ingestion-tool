@@ -20,6 +20,11 @@ const plugins: ForgeConfig["plugins"] = [
         config: "vite.preload.config.ts",
         target: "preload",
       },
+      {
+        entry: "src/workers/fileWorker.ts",
+        config: "vite.main.config.ts",
+        target: "main",
+      },
     ],
     renderer: [
       {

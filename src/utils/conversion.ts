@@ -1,11 +1,12 @@
-import type { CallLogEntry, ParseResult } from "@/types/common";
+import { CallLogEntry, ParseResult } from "../types/common";
 import { CIR_EXPECTED_KEYS } from "./constants";
+import * as Yup from "yup";
 
 export const parseCallLogFile = (
   fileContent: string,
   fileName: string
 ): ParseResult => {
-  const lines = fileContent.split("\n");
+  const lines = fileContent?.split("\n");
   const data: CallLogEntry = { criFileName: fileName };
   const foundKeys = new Set<string>();
   let isReadingMessageContent = false;
@@ -97,7 +98,7 @@ export const parseCallLogFile = (
 
       // Handle latitude,longitude pairs
       if (key === "Latitude,Longitude A") {
-        const coords = value.split(",");
+        const coords = value?.split(",");
         if (coords.length >= 2) {
           data.latitudeA = coords[0].trim() || undefined;
           data.longitudeA = coords[1].trim() || undefined;
@@ -108,7 +109,7 @@ export const parseCallLogFile = (
       }
 
       if (key === "Latitude,Longitude B") {
-        const coords = value.split(",");
+        const coords = value?.split(",");
         if (coords.length >= 2) {
           data.latitudeB = coords[0].trim() || undefined;
           data.longitudeB = coords[1].trim() || undefined;
@@ -154,8 +155,8 @@ export const getValidISOStringFromCri = (
     return !isNaN(dateVal.getTime()) ? dateVal.toISOString() : undefined;
   }
 
-  const [datePart, timePart] = dateVal.split(" ");
-  const [day, month, year] = datePart.split("/").map(Number);
+  const [datePart, timePart] = dateVal?.split(" ");
+  const [day, month, year] = datePart?.split("/").map(Number);
 
   const fullYear = year < 50 ? 2000 + year : 1900 + year;
 
@@ -166,4 +167,74 @@ export const getValidISOStringFromCri = (
   const d = new Date(fullYear, month - 1, day, hours, minutes, seconds);
 
   return !isNaN(d.getTime()) ? d.toISOString() : new Date(dateVal);
+};
+export const getFileType = (file: File): "audio" | "text" => {
+  const audioExtensions = ["mp3", "wav", "mp4", "m4a"];
+  const extension = file?.name?.split(".").pop()?.toLowerCase() || "";
+  return audioExtensions.includes(extension) ? "audio" : "text";
+};
+
+export const validationSchemaForm = Yup.object({
+  files: Yup.array()
+    .min(1, "At least one file is required")
+    .required("Files are required"),
+});
+export const createMetadataValidationSchema = (fileType: "audio" | "text") => {
+  const baseSchema: any = {
+    targetNumber: Yup.string()
+      .required("Target Number is required")
+      .test(
+        "match-caller-callee",
+        "Target Number must match either Caller or Callee",
+        function (value) {
+          const { caller, callee } = this.parent;
+          if (!value) return false;
+          return value === caller || value === callee;
+        }
+      ),
+
+    trackingCode: Yup.string().required("Target code is required"),
+
+    caller: Yup.string()
+      .matches(
+        fileType === "audio" ? /^\+?[1-9]\d{1,14}$/ : /^(AZ)[A-Z]$/,
+        "Please enter a valid phone number"
+      )
+      .required(
+        fileType === "audio" ? "Caller is required" : "Sender is required"
+      ),
+
+    callee: Yup.string()
+      .matches(
+        fileType === "audio" ? /^\+?[1-9]\d{1,14}$/ : /^(AZ)[A-Z]$/,
+        "Please enter a valid phone number"
+      )
+      .required(
+        fileType === "audio" ? "Callee is required" : "Receiver is required"
+      ),
+
+    direction: Yup.string()
+      .oneOf(
+        [
+          "6aacaec3-6b25-492e-8558-097078417aea",
+          "5b5fe700-2791-4892-ad53-0bee86e95aa7",
+          "a879922b-2632-4fbd-9920-120b44c500ca",
+        ],
+        "Direction must be incoming or outgoing"
+      )
+      .required("Direction is required"),
+  };
+
+  if (fileType === "audio") {
+    baseSchema.startTime = Yup.date().required("Call start time is required");
+    baseSchema.endTime = Yup.date()
+      .required("Call end time is required")
+      .min(Yup.ref("startTime"), "End time must be after start time");
+  } else {
+    baseSchema.startTime = Yup.date().required("SMS date-time is required");
+    baseSchema.caller = Yup.string().required("Sender is required");
+    baseSchema.callee = Yup.string().required("Receiver is required");
+  }
+
+  return Yup.object(baseSchema);
 };

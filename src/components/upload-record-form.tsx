@@ -1,79 +1,37 @@
-
-
 import axios from "axios";
 import { useFormik } from "formik";
-import {
-  CheckLine,
-  ChevronDown,
-  FileText,
-  Phone,
-  Trash2,
-  Upload,
-} from "lucide-react";
+import { Upload } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useLayoutEffect, useState } from "react";
-import * as Yup from "yup";
+import { useCallback, useEffect, useState } from "react";
 
-import { Label } from "./ui/label";
-import { Progress } from "./ui/progress";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from "./ui/tooltip";
 import { usePolling } from "../hooks/use-polling";
 import { useToast } from "../hooks/use-toast";
+import { Label } from "./ui/label";
 
 import { useFiltersContext } from "../context/filters-context";
 import { useUploadStatus } from "../context/upload-status-context";
-import type { ParseResult } from "../types/common";
+import type { FileRecord, ParseResult } from "../types/common";
 import {
+  createMetadataValidationSchema,
+  getFileType,
   getValidISOStringFromCri,
   parseCallLogFile,
+  validationSchemaForm,
 } from "../utils/conversion";
-import LabeledDatePicker from "./labeled-date-picker";
-import { LabeledTextInput } from "./labeled-input";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./labeled-select";
 import { Button } from "./ui/button";
+import { FileItem } from "./upload-form/FileItems";
 
-interface FileRecord {
-  isReferenceFound: boolean;
-  id: string;
-  file: File;
-  type: "audio" | "text";
-  duration?: string;
-  requestId?: string;
-  trackingCode?: string;
-  progress?: number;
-  status?: "uploading" | "processing" | "completed" | "failed";
-  metadata?: {
-    targetNumber?: string;
-    trackingCode?: string;
-    caller?: string;
-    callee?: string;
-    startTime?: Date;
-    endTime?: Date;
-    direction?: string;
-    imei?: string;
-    imsi?: string;
-    startCellId?: string;
-    endCellId?: string;
-    startCellAddress?: string;
-    endCellAddress?: string;
-    startCellLatitude?: string;
-    endCellLatitude?: string;
-    startCellLongitude?: string;
-    endCellLongitude?: string;
-    message?: string;
-  };
+declare global {
+  interface Window {
+    electronAPI: {
+      selectDirectory: () => Promise<string | null>;
+      listFiles: (
+        dirPath: string
+      ) => Promise<{ validFiles: FileRecord[]; newFileRecords: FileRecord[] }>;
+    };
+  }
 }
+
 interface PollingData {
   status: string;
   requestId?: string;
@@ -81,601 +39,13 @@ interface PollingData {
   trackedNumber?: string;
 }
 
-const validationSchema = Yup.object({
-  files: Yup.array()
-    .min(1, "At least one file is required")
-    .required("Files are required"),
-});
-
-const createMetadataValidationSchema = (fileType: "audio" | "text") => {
-  const baseSchema: any = {
-    targetNumber: Yup.string()
-      .required("Target Number is required")
-      .test(
-        "match-caller-callee",
-        "Target Number must match either Caller or Callee",
-        function (value) {
-          const { caller, callee } = this.parent;
-          if (!value) return false;
-          return value === caller || value === callee;
-        }
-      ),
-
-    trackingCode: Yup.string().required("Target code is required"),
-
-    caller: Yup.string()
-      .matches(
-        fileType === "audio" ? /^\+?[1-9]\d{1,14}$/ : /^(AZ)[A-Z]$/,
-        "Please enter a valid phone number"
-      )
-      .required(
-        fileType === "audio" ? "Caller is required" : "Sender is required"
-      ),
-
-    callee: Yup.string()
-      .matches(
-        fileType === "audio" ? /^\+?[1-9]\d{1,14}$/ : /^(AZ)[A-Z]$/,
-        "Please enter a valid phone number"
-      )
-      .required(
-        fileType === "audio" ? "Callee is required" : "Receiver is required"
-      ),
-
-    direction: Yup.string()
-      .oneOf(
-        [
-          "6aacaec3-6b25-492e-8558-097078417aea",
-          "5b5fe700-2791-4892-ad53-0bee86e95aa7",
-          "a879922b-2632-4fbd-9920-120b44c500ca",
-        ],
-        "Direction must be incoming or outgoing"
-      )
-      .required("Direction is required"),
-  };
-
-  if (fileType === "audio") {
-    baseSchema.startTime = Yup.date().required("Call start time is required");
-    baseSchema.endTime = Yup.date()
-      .required("Call end time is required")
-      .min(Yup.ref("startTime"), "End time must be after start time");
-  } else {
-    baseSchema.startTime = Yup.date().required("SMS date-time is required");
-    baseSchema.caller = Yup.string().required("Sender is required");
-    baseSchema.callee = Yup.string().required("Receiver is required");
-  }
-
-  return Yup.object(baseSchema);
-};
-
-// File Item Component
-
-const FileItem: React.FC<{
-  fileRecord: FileRecord;
-  onDelete: (id: string) => void;
-  onUpdateMetadata: (
-    id: string,
-    metadata: any,
-    isReferenceFound: boolean
-  ) => void;
-  errors?: Record<string, string>;
-  showExpandButton?: boolean;
-}> = ({
-  fileRecord,
-  onDelete,
-  onUpdateMetadata,
-  errors = {},
-  showExpandButton = true,
-}) => {
-  const { uploadStatus } = useUploadStatus();
-  // Auto-expand if there are errors for this file
-  const hasErrors = errors && Object.keys(errors).length > 0;
-  const [isExpanded, setIsExpanded] = useState(hasErrors);
-  const [metadata, setMetadata] = useState(fileRecord.metadata || {});
-
-  const handleMetadataChange = (
-    field: string,
-    value: string | Date | undefined
-  ) => {
-    const updatedMetadata = { ...metadata, [field]: value };
-    setMetadata(updatedMetadata);
-    onUpdateMetadata(
-      fileRecord.id,
-      updatedMetadata,
-      fileRecord.isReferenceFound
-    );
-  };
-
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return (
-      Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
-    );
-  };
-
-  const getStatusDisplayText = (status?: string) => {
-    if (!status) return "Waiting...";
-
-    // Convert API status to display text
-    return status
-      .split("_")
-      .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
-      .join(" ");
-  };
-
-  const fileStatus = fileRecord.requestId
-    ? uploadStatus[fileRecord.requestId]
-    : null;
-  const currentStatus = fileStatus?.status;
-  const currentProgress = fileStatus?.progress || 0;
-  const statusDisplayText = getStatusDisplayText(fileStatus?.status);
-
-  // Auto-expand and scroll into view if errors appear
-  useLayoutEffect(() => {
-    if (hasErrors && fileRecord.isReferenceFound) {
-      setIsExpanded(true);
-    }
-    if (isExpanded) {
-      const el = document.getElementById("active-file-form" + fileRecord.id);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
-    }
-  }, [isExpanded, hasErrors]);
-
-  return (
-    <div
-      className={`flex w-full flex-col gap-3 overflow-hidden rounded-lg border  bg-white p-3 ${
-        fileRecord.isReferenceFound
-          ? "border-slate-200"
-          : "border-red-500 opacity-90"
-      } ${showExpandButton ? "" : "border-green-400 shadow-md "}`}
-    >
-      <div className="flex items-center justify-between">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="flex flex-shrink-0 items-center gap-2.5 rounded-md bg-neutral-100 p-[5px]">
-            {fileRecord.type === "audio" ? (
-              <Phone className="h-3.5 w-3.5 text-slate-600" />
-            ) : (
-              <FileText className="h-3.5 w-3.5 text-slate-600" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-slate-900">
-              {fileRecord.file.name}
-            </p>
-            <p className="text-xs text-slate-500">
-              {formatFileSize(fileRecord.file.size)}
-            </p>
-          </div>
-        </div>
-
-        <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
-          {!fileRecord.isReferenceFound && (
-            <p className="hidden text-xs font-medium text-red-500 md:block lg:w-24">
-              Reference not found in CRI Files
-            </p>
-          )}
-
-          <div className="hidden rounded-md border border-slate-200 px-3 py-1 sm:block">
-            <p className="text-sm font-medium text-neutral-500 capitalize">
-              {fileRecord.type}
-            </p>
-          </div>
-
-          {fileRecord.type === "audio" && fileRecord.duration && (
-            <p className="hidden w-20 text-sm font-medium text-neutral-500 md:block lg:w-24">
-              {fileRecord.duration || ""}
-            </p>
-          )}
-
-          {fileRecord.requestId && currentProgress !== undefined && (
-            <div className="flex items-center gap-2">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex items-center gap-2">
-                      <Progress
-                        value={
-                          !currentStatus || currentStatus === "error"
-                            ? 100
-                            : currentProgress
-                        }
-                        className={`h-2 w-24 ${
-                          !currentStatus || currentStatus.includes("FAILED")
-                            ? "[&>div]:bg-red-500"
-                            : currentStatus === "KEYWORD_DETECTION_COMPLETE" ||
-                              currentStatus === "COMPLETED"
-                            ? "[&>div]:bg-green-500"
-                            : "[&>div]:bg-blue-500"
-                        }`}
-                      />
-                      <span
-                        className={`text-xs font-medium ${
-                          !currentStatus || currentStatus === "error"
-                            ? "text-red-500"
-                            : currentStatus === "completed"
-                            ? "text-green-500"
-                            : "text-blue-500"
-                        }`}
-                      >
-                        {statusDisplayText}
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{statusDisplayText}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          )}
-          {showExpandButton && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="h-auto p-1"
-              >
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${
-                    isExpanded ? "rotate-180" : ""
-                  }`}
-                />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDelete(fileRecord.id)}
-                className="h-auto p-1 text-slate-600 hover:text-red-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </>
-          )}
-          {!showExpandButton && (
-            <CheckLine className="h-4 w-4 text-green-400" />
-          )}
-        </div>
-      </div>
-
-      {isExpanded && (
-        <div
-          className="bg-gray-100"
-          id={isExpanded ? "active-file-form" + fileRecord.id : ""}
-        >
-          <div className="mx-auto max-w-4xl">
-            <div className="flex w-full max-w-full flex-col gap-4 overflow-hidden rounded-md bg-slate-50 px-3 py-4">
-              <div className="flex flex-col gap-3">
-                <Label className="text-sm font-medium text-slate-900">
-                  Tracking Information
-                </Label>
-                <div className="grid grid-cols-2 gap-4 sm:grid-cols-2">
-                  <LabeledTextInput
-                    label="Target Number *"
-                    placeholder="Enter Target Number..."
-                    value={metadata.targetNumber || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("targetNumber", e.target.value)
-                    }
-                    error={errors.targetNumber}
-                    className="text-xs"
-                  />
-                  <LabeledTextInput
-                    label="Target Code *"
-                    placeholder="Enter Target code..."
-                    value={metadata.trackingCode || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("trackingCode", e.target.value)
-                    }
-                    error={errors.trackingCode}
-                    className="text-xs"
-                  />
-                </div>
-              </div>
-
-              {/* Call Information */}
-              <div className="flex flex-col gap-3">
-                <Label className="text-sm font-medium text-slate-900">
-                  Call Information
-                </Label>
-                <div className="grid w-full max-w-full grid-cols-1 gap-3 sm:grid-cols-4 lg:grid-cols-3">
-                  <LabeledTextInput
-                    label={fileRecord.type == "audio" ? "Caller *" : "Sender *"}
-                    placeholder={
-                      fileRecord.type == "audio"
-                        ? "Enter Caller..."
-                        : "Enter Sender..."
-                    }
-                    value={metadata.caller || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("caller", e.target.value)
-                    }
-                    error={errors.caller}
-                    className="text-xs"
-                  />
-                  <LabeledTextInput
-                    label={
-                      fileRecord.type == "audio" ? "Caller *" : "Reciever *"
-                    }
-                    placeholder={
-                      fileRecord.type == "audio"
-                        ? "Enter Caller..."
-                        : "Enter Receiver..."
-                    }
-                    value={metadata.callee || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("callee", e.target.value)
-                    }
-                    error={errors.callee}
-                    className="text-xs"
-                  />
-                  <div>
-                    <Select
-                      value={metadata.direction || ""}
-                      onValueChange={(value: any) =>
-                        handleMetadataChange("direction", value)
-                      }
-                    >
-                      <SelectTrigger label="Direction *" className="text-xs">
-                        <SelectValue placeholder="Select direction" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="6aacaec3-6b25-492e-8558-097078417aea">
-                          Incoming
-                        </SelectItem>
-                        <SelectItem value="5b5fe700-2791-4892-ad53-0bee86e95aa7">
-                          Outgoing
-                        </SelectItem>
-                        {/* <SelectItem value="a879922b-2632-4fbd-9920-120b44c500ca">MISSED</SelectItem> */}
-                      </SelectContent>
-                    </Select>
-                    {errors.direction && (
-                      <p className="col-span-4 text-xs text-red-500">
-                        {errors.direction}
-                      </p>
-                    )}
-                  </div>
-                  {fileRecord.type === "text" && (
-                    <div className="flex flex-col">
-                      <LabeledDatePicker
-                        label="SMS Date-Time *"
-                        value={metadata.startTime}
-                        onChange={(date) =>
-                          handleMetadataChange("startTime", date)
-                        }
-                        className="text-xs"
-                      />
-                      {errors.startTime && (
-                        <p className="text-xs text-red-500">
-                          {errors.startTime}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                  {fileRecord.type == "audio" && (
-                    <>
-                      <div className="flex flex-col">
-                        <LabeledDatePicker
-                          label="Call Start *"
-                          value={metadata.startTime}
-                          onChange={(date) =>
-                            handleMetadataChange("startTime", date)
-                          }
-                          className="text-xs"
-                        />
-                        {errors.startTime && (
-                          <p className="text-xs text-red-500">
-                            {errors.startTime}
-                          </p>
-                        )}
-                      </div>
-                      <div className="flex flex-col">
-                        <LabeledDatePicker
-                          label="Call End *"
-                          value={metadata.endTime}
-                          onChange={(date) =>
-                            handleMetadataChange("endTime", date)
-                          }
-                          minDate={metadata.startTime}
-                          className="text-xs"
-                        />
-                        {errors.endTime && (
-                          <p className="text-xs text-red-500">
-                            {errors.endTime}
-                          </p>
-                        )}
-                      </div>
-                    </>
-                  )}
-                </div>
-              </div>
-
-              {/* Device Information */}
-              <div className="flex flex-col gap-3">
-                <Label className="text-sm font-medium text-slate-900">
-                  Device Information
-                </Label>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <LabeledTextInput
-                    label="IMEI"
-                    placeholder="Enter IMEI..."
-                    value={metadata.imei || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("imei", e.target.value)
-                    }
-                    className="text-xs"
-                  />
-                  {errors.imei && (
-                    <p className="col-span-2 text-xs text-red-500">
-                      {errors.imei}
-                    </p>
-                  )}
-                  <LabeledTextInput
-                    label="IMSI"
-                    placeholder="Enter IMSI..."
-                    value={metadata.imsi || ""}
-                    onChange={(e: any) =>
-                      handleMetadataChange("imsi", e.target.value)
-                    }
-                    className="text-xs"
-                  />
-                  {errors.imsi && (
-                    <p className="col-span-2 text-xs text-red-500">
-                      {errors.imsi}
-                    </p>
-                  )}
-                </div>
-              </div>
-
-              {/* Location Details */}
-              <div className="flex flex-col gap-3">
-                <Label className="text-sm font-medium text-slate-900">
-                  Location Details
-                </Label>
-                <div className="grid w-full max-w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-2">
-                  <LabeledTextInput
-                    label="Start Cell ID"
-                    placeholder="Enter Start Cell ID..."
-                    value={metadata.startCellId || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("startCellId", e.target.value)
-                    }
-                    className="text-xs"
-                  />
-                  {errors.startCellId && (
-                    <p className="col-span-2 text-xs text-red-500">
-                      {errors.startCellId}
-                    </p>
-                  )}
-                  <LabeledTextInput
-                    label="End Cell ID"
-                    placeholder="Enter End Cell ID..."
-                    value={metadata.endCellId || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("endCellId", e.target.value)
-                    }
-                    className="text-xs"
-                  />
-                  {errors.endCellId && (
-                    <p className="col-span-2 text-xs text-red-500">
-                      {errors.endCellId}
-                    </p>
-                  )}
-                  <LabeledTextInput
-                    label="Start Cell Address"
-                    placeholder="Enter Start Cell Address..."
-                    value={metadata.startCellAddress || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("startCellAddress", e.target.value)
-                    }
-                    className="text-xs"
-                  />
-                  {errors.startCellAddress && (
-                    <p className="col-span-2 text-xs text-red-500">
-                      {errors.startCellAddress}
-                    </p>
-                  )}
-                  <LabeledTextInput
-                    label="End Cell Address"
-                    placeholder="Enter End Cell Address..."
-                    value={metadata.endCellAddress || ""}
-                    onChange={(e) =>
-                      handleMetadataChange("endCellAddress", e.target.value)
-                    }
-                    className="text-xs"
-                  />
-                  {errors.endCellAddress && (
-                    <p className="col-span-2 text-xs text-red-500">
-                      {errors.endCellAddress}
-                    </p>
-                  )}
-                  <div className="grid grid-cols-2 gap-2 sm:col-span-1 lg:col-span-1">
-                    <LabeledTextInput
-                      label="Lat."
-                      placeholder="Enter Start Latitude..."
-                      value={metadata.startCellLatitude || ""}
-                      onChange={(e: any) =>
-                        handleMetadataChange(
-                          "startCellLatitude",
-                          e.target.value
-                        )
-                      }
-                      className="pl-13 text-xs"
-                    />
-                    {errors.startCellLatitude && (
-                      <p className="col-span-2 text-xs text-red-500">
-                        {errors.startCellLatitude}
-                      </p>
-                    )}
-                    <LabeledTextInput
-                      label="Long."
-                      placeholder="Enter Start Longitude..."
-                      value={metadata.startCellLongitude || ""}
-                      onChange={(e: any) =>
-                        handleMetadataChange(
-                          "startCellLongitude",
-                          e.target.value
-                        )
-                      }
-                      className="pl-13 text-xs"
-                    />
-                    {errors.startCellLongitude && (
-                      <p className="col-span-2 text-xs text-red-500">
-                        {errors.startCellLongitude}
-                      </p>
-                    )}
-                  </div>
-                  <div className="grid grid-cols-2 gap-2 sm:col-span-1 lg:col-span-1">
-                    <LabeledTextInput
-                      label="Lat."
-                      placeholder="Enter End Latitude..."
-                      value={metadata.endCellLatitude || ""}
-                      onChange={(e: any) =>
-                        handleMetadataChange("endCellLatitude", e.target.value)
-                      }
-                      className="pl-13 text-xs"
-                    />
-                    {errors.endCellLatitude && (
-                      <p className="col-span-2 text-xs text-red-500">
-                        {errors.endCellLatitude}
-                      </p>
-                    )}
-                    <LabeledTextInput
-                      label="Long."
-                      placeholder="Enter End Longitude..."
-                      value={metadata.endCellLongitude || ""}
-                      onChange={(e: any) =>
-                        handleMetadataChange("endCellLongitude", e.target.value)
-                      }
-                      className="pl-13 text-xs"
-                    />
-                    {errors.endCellLongitude && (
-                      <p className="col-span-2 text-xs text-red-500">
-                        {errors.endCellLongitude}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-};
-
 // Main Component
 const UploadRecordForm: React.FC = () => {
   const [fileRecords, setFileRecords] = useState<FileRecord[]>([]);
   const [uploadedFilesList, setUploadedFilesList] = useState<FileRecord[]>([]);
   const { getFilteredTypes } = useFiltersContext();
   const callsDirectionStatus = getFilteredTypes("call_direction_type");
+  const [directory, setDirPath] = useState("");
   const [dragOver, setDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<
@@ -747,7 +117,7 @@ const UploadRecordForm: React.FC = () => {
       trackingNumber: "",
       files: [] as File[],
     },
-    validationSchema,
+    validationSchema: validationSchemaForm,
     onSubmit: async (values) => {
       const errors: Record<string, Record<string, string>> = {};
       let hasErrors = false;
@@ -989,17 +359,17 @@ const UploadRecordForm: React.FC = () => {
                       data.status === "FILE_UPLOADED"
                         ? 20
                         : data.status === "PROCESSING_STARTED"
-                        ? 40
-                        : data.status === "PROCESSING_COMPLETE"
-                        ? 60
-                        : data.status === "KEYWORD_DETECTION_STARTED"
-                        ? 80
-                        : data.status === "KEYWORD_DETECTION_COMPLETE" ||
-                          data.status === "COMPLETED"
-                        ? 100
-                        : data.status.includes("FAILED")
-                        ? 100
-                        : 25;
+                          ? 40
+                          : data.status === "PROCESSING_COMPLETE"
+                            ? 60
+                            : data.status === "KEYWORD_DETECTION_STARTED"
+                              ? 80
+                              : data.status === "KEYWORD_DETECTION_COMPLETE" ||
+                                  data.status === "COMPLETED"
+                                ? 100
+                                : data.status.includes("FAILED")
+                                  ? 100
+                                  : 25;
 
                     // Update status with the exact API status
                     updateUploadStatus(requestInfo.requestId, {
@@ -1090,12 +460,6 @@ const UploadRecordForm: React.FC = () => {
       }
     },
   });
-
-  const getFileType = (file: File): "audio" | "text" => {
-    const audioExtensions = ["mp3", "wav", "mp4", "m4a"];
-    const extension = file.name.split(".").pop()?.toLowerCase() || "";
-    return audioExtensions.includes(extension) ? "audio" : "text";
-  };
 
   const validateFileMetadata = async (fileRecords: FileRecord[]) => {
     const errors: Record<string, Record<string, string>> = {};
@@ -1227,19 +591,44 @@ const UploadRecordForm: React.FC = () => {
     formik.setFieldValue("files", [...formik.values.files, ...validFiles]);
   };
 
+  const handleFileInput = async () => {
+    const path = await window.electronAPI.selectDirectory();
+    if (path) {
+      setDirPath(path);
+      const fileList = await window.electronAPI.listFiles(path);
+      console.log({ fileList }, "__fileList");
+      setFileRecords((prev) => {
+        const updatedRecords = [...prev, ...fileList.newFileRecords];
+
+        // Validate metadata for all files asynchronously
+        validateFileMetadata(updatedRecords).then(({ errors, hasErrors }) => {
+          setValidationErrors(errors);
+          if (hasErrors) {
+            toast({
+              title: "Missing Required Information",
+              description:
+                "Please fill in all required fields for the uploaded files.",
+              variant: "destructive",
+            });
+          }
+        });
+
+        return updatedRecords;
+      });
+
+      formik.setFieldValue("files", [
+        ...formik.values.files,
+        ...fileList.validFiles,
+      ]); // handleFileUpload(fileList);
+    }
+  };
+
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
     const files = e.dataTransfer.files;
     handleFileUpload(files);
   };
-
-  const handleFileInput = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      handleFileUpload(e.target.files);
-    }
-  };
-
   const deleteFile = (id: string) => {
     setFileRecords((prev) => {
       const updated = prev.filter((record) => record.id !== id);
@@ -1464,15 +853,11 @@ const UploadRecordForm: React.FC = () => {
                     <div className="flex flex-col items-center gap-1">
                       <p className="text-xs font-semibold text-slate-900 sm:text-sm">
                         Drag and drop files here, or{" "}
-                        <label className="cursor-pointer text-blue-600 hover:underline">
+                        <label
+                          onClick={handleFileInput}
+                          className="cursor-pointer text-blue-600 hover:underline"
+                        >
                           browse
-                          <input
-                            type="file"
-                            multiple
-                            accept=".mp3,.wav,.mp4,.m4a,.ogg,.txt,audio/*"
-                            onChange={handleFileInput}
-                            className="hidden"
-                          />
                         </label>
                       </p>
                       <p className="text-xs text-neutral-500">
