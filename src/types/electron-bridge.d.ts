@@ -20,6 +20,7 @@ export interface UploadContext {
 }
 
 export interface FileListResult {
+  allFiles: FileRecord[];
   validFiles: FileRecord[];
   newFileRecords: FileRecord[];
   smsFiles: FileRecord[];
@@ -29,11 +30,12 @@ export interface FileListResult {
   totalFiles?: number;
   validationErrors?: Array<{
     fileName: string;
-    fileType: "audio" | "text";
+    fileType: "audio" | "text" | "system";
     criFileName?: string;
     errors: string[];
     isValid: boolean;
   }>;
+  error?: string;
 }
 
 export interface FileStatusItem {

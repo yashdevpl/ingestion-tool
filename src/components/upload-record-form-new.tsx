@@ -1,22 +1,21 @@
 import { Upload } from "lucide-react";
-import React, { useCallback, useMemo, useState, useEffect } from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 
 import { useFilePolling } from "../hooks/use-file-polling";
 import { useToast } from "../hooks/use-toast";
 import type { FileRecord } from "../types/common";
 import { ElectronBridge } from "../types/electron-bridge";
+import { CompactUploadProgress } from "./upload-form/CompactUploadProgress";
 import { EmptyFilesList } from "./upload-form/EmptyFilesList";
 import { FileInputSection } from "./upload-form/FileInputSection";
 import { FileItem } from "./upload-form/FileItems";
 import { FilesSummaryDialog } from "./upload-form/FilesSummaryDialog";
-import { FileStatistics } from "./upload-form/FileStatistics";
+import { FileStatusTabs } from "./upload-form/FileStatusTabs";
 import { FiltersAndSearch } from "./upload-form/FiltersAndSearch";
 import { ReadingFilesDialog } from "./upload-form/ReadingFilesDialog";
 import { UploadErrorDisplay } from "./upload-form/UploadErrorDisplay";
 import { UploadFooter } from "./upload-form/UploadFooter";
 import { VirtualizedFileList } from "./upload-form/VirtualizedFileList";
-import { FileStatusTabs } from "./upload-form/FileStatusTabs";
-import { CompactUploadProgress } from "./upload-form/CompactUploadProgress";
 
 declare global {
   interface Window {
@@ -84,6 +83,8 @@ const UploadRecordForm: React.FC = () => {
     "selection"
   );
   const [uploadStarted, setUploadStarted] = useState(false);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [processingComplete, setProcessingComplete] = useState(false);
   const [uploadStats, setUploadStats] = useState({
     total: 0,
     uploaded: 0,
@@ -370,17 +371,45 @@ const UploadRecordForm: React.FC = () => {
 
   const startFileProcessing = async (path: string) => {
     setIsReadingFiles(true);
+    setUploadError(null); // Clear any previous errors
+
     try {
       // Create upload context first
+      console.log("Creating upload context...");
       const context = await window.electronAPI.createUploadContext();
       setContextId(context.id);
+      console.log("Upload context created:", context.id);
 
       // List and process files
+      console.log("Starting file processing for path:", path);
       const result = await window.electronAPI.listFiles(path, context.id);
       console.log("File processing result:", result);
 
-      setFileRecords(result.validFiles || []);
-      console.log("Valid files found:", result.validFiles?.length || 0);
+      // Check if the result indicates an error or empty result
+      if (!result) {
+        throw new Error(
+          "No response received from file processing. The worker may have crashed or the API might be down."
+        );
+      }
+
+      // Check for system errors returned by the worker
+      if (result.error) {
+        throw new Error(result.error);
+      }
+
+      // Check if there are any valid files or if processing completely failed
+      if (!result.validFiles && !result.allFiles) {
+        throw new Error(
+          "File processing failed completely. No files were found or processed."
+        );
+      }
+
+      // Set file records
+      const validFiles = result.validFiles || [];
+      const allFiles = result.allFiles || [];
+      setFileRecords(validFiles);
+      console.log("Valid files found:", validFiles.length);
+      console.log("Total files processed:", allFiles.length);
 
       if (result.validationErrors) {
         // Transform validation errors to the expected format
@@ -396,7 +425,8 @@ const UploadRecordForm: React.FC = () => {
 
       // Calculate totals and errors
       const totalErrors = result.validationErrors?.length || 0;
-      const totalFiles = result.validFiles?.length || 0; // Use validFiles length instead of totalFiles property
+      const totalFiles = validFiles.length;
+      const totalProcessed = allFiles.length;
 
       // Set read files data for dialog
       setReadFilesData({
@@ -423,19 +453,87 @@ const UploadRecordForm: React.FC = () => {
         audioMetadataFiles: result.audioMetadataFiles?.length || 0,
         totalFiles: totalFiles,
         totalErrors: totalErrors,
+        totalProcessed: totalProcessed,
+      });
+
+      // Show appropriate toast message based on results
+      if (totalFiles > 0) {
+        toast({
+          title: "Files processed successfully",
+          description: `Found ${totalFiles} valid files out of ${totalProcessed} processed${totalErrors ? ` (${totalErrors} files with validation errors)` : ""}`,
+        });
+      } else if (totalProcessed > 0) {
+        toast({
+          title: "Files processed with issues",
+          description: `Processed ${totalProcessed} files, but none passed validation. Check the error details.`,
+          variant: "destructive",
+        });
+      } else {
+        toast({
+          title: "No files found",
+          description:
+            "No supported files were found in the selected directory.",
+          variant: "destructive",
+        });
+      }
+    } catch (error: any) {
+      console.error("File processing error:", error);
+
+      // Determine the type of error and show appropriate message
+      let errorTitle = "Processing failed";
+      let errorDescription =
+        "An unexpected error occurred while processing files.";
+
+      if (error?.message) {
+        if (
+          error.message.includes("worker") ||
+          error.message.includes("crashed")
+        ) {
+          errorTitle = "Worker Process Error";
+          errorDescription =
+            "The file processing worker encountered an error. This might be due to corrupted files or system resource issues.";
+        } else if (
+          error.message.includes("API") ||
+          error.message.includes("network") ||
+          error.message.includes("fetch")
+        ) {
+          errorTitle = "API Connection Error";
+          errorDescription =
+            "Failed to connect to the server. Please check if the server is running and try again.";
+        } else if (error.message.includes("context")) {
+          errorTitle = "Context Creation Error";
+          errorDescription =
+            "Failed to create upload context. The server may be unavailable.";
+        } else if (
+          error.message.includes("permission") ||
+          error.message.includes("access")
+        ) {
+          errorTitle = "File Access Error";
+          errorDescription =
+            "Unable to access the selected directory or files. Please check file permissions.";
+        } else {
+          errorDescription = error.message;
+        }
+      }
+
+      // Set upload error for display in the error component
+      setUploadError({
+        message: errorDescription,
+        apiType: "System",
+        failedCount: 1,
+        failedFiles: [],
       });
 
       toast({
-        title: "Files processed",
-        description: `Found ${totalFiles} valid files${totalErrors ? ` (${totalErrors} files with errors)` : ""}`,
-      });
-    } catch (error: any) {
-      console.error("File processing error:", error);
-      toast({
-        title: "Processing failed",
-        description: error?.message || "Failed to process files",
+        title: errorTitle,
+        description: errorDescription,
         variant: "destructive",
       });
+
+      // Reset states on error
+      setReadFilesData(null);
+      setFileRecords([]);
+      setValidationErrors({});
     } finally {
       setIsReadingFiles(false);
       setProcessingLoader(false);
@@ -515,10 +613,22 @@ const UploadRecordForm: React.FC = () => {
     });
   };
 
+  const handleProcessingStart = () => {
+    setIsProcessing(true);
+    setProcessingComplete(false);
+  };
+
+  const handleProcessingComplete = () => {
+    setIsProcessing(false);
+    setProcessingComplete(true);
+  };
+
   // Handlers for UI mode switching
   const handleBackToUpload = () => {
     setUiMode("selection");
     setUploadStarted(false);
+    setIsProcessing(false);
+    setProcessingComplete(false);
     // Reset states
     setFileRecords([]);
     setDirPath("");
@@ -548,8 +658,12 @@ const UploadRecordForm: React.FC = () => {
   useEffect(() => {
     if (data?.data && uploadStarted) {
       // Count files by their upload and ingestion status
-      const uploadedCount = data.data.filter((file: FileRecord) => file.isUploaded).length;
-      const ingestedCount = data.data.filter((file: FileRecord) => file.isIngested).length;
+      const uploadedCount = data.data.filter(
+        (file: FileRecord) => file.isUploaded
+      ).length;
+      const ingestedCount = data.data.filter(
+        (file: FileRecord) => file.isIngested
+      ).length;
       // For failed files, we'll need to track this separately as it's not in the FileRecord interface
       // This might come from uploadError state instead
       const failedCount = uploadError?.failedCount || 0;
@@ -607,7 +721,9 @@ const UploadRecordForm: React.FC = () => {
                     Upload Files
                   </h1>
                   <p className="text-sm text-slate-500">
-                    Managing {((data?.data || fileRecords) || []).length.toLocaleString()} files
+                    Managing{" "}
+                    {(data?.data || fileRecords || []).length.toLocaleString()}{" "}
+                    files
                   </p>
                 </div>
               </div>
@@ -684,6 +800,8 @@ const UploadRecordForm: React.FC = () => {
               ingestedFiles={uploadStats.ingested}
               failedFiles={uploadStats.failed}
               isUploading={processingLoader}
+              isProcessing={isProcessing}
+              processingComplete={processingComplete}
               onCancel={handleCancelUpload}
               onViewDetails={handleViewStatusDetails}
             />
@@ -710,7 +828,12 @@ const UploadRecordForm: React.FC = () => {
       )}
 
       {uiMode === "status" && (
-        <FileStatusTabs contextId={contextId} onBack={handleBackToUpload} />
+        <FileStatusTabs
+          contextId={contextId}
+          onBack={handleBackToUpload}
+          onProcessingStart={handleProcessingStart}
+          onProcessingComplete={handleProcessingComplete}
+        />
       )}
     </div>
   );

@@ -344,22 +344,72 @@ ipcMain.handle(
     });
 
     try {
+      console.log(`Starting file processing for directory: ${dirPath} with contextId: ${contextId}`);
+      
       const listedFiles = await listedFilesWorkerPool.exec(
         "listAndClassifyFiles",
         [dirPath, contextId]
       );
-      // const { validFiles, audioMetadataFiles, files } =
-      //   await criParserWorkerPool.exec("readCRIFiles", [listedFiles]);
-      // const newFileRecords = await fileRecordWorkerPool.exec(
-      //   "createFileMetadataList",
-      //   [validFiles, CRITextToObjList]
-      // );
+      
+      console.log(`File processing completed. Found ${listedFiles?.validFiles?.length || 0} valid files out of ${listedFiles?.allFiles?.length || 0} total files`);
+      
+      if (!listedFiles) {
+        throw new Error("Worker returned no data - processing may have failed");
+      }
+
+      // Log any API call failures that might have occurred during processing
+      if (listedFiles.validationErrors && listedFiles.validationErrors.length > 0) {
+        console.warn(`Found ${listedFiles.validationErrors.length} validation errors during processing`);
+      }
 
       return listedFiles;
-    } catch (err) {
-      console.error(err);
-      pool.terminate();
-      return [];
+    } catch (err: any) {
+      console.error("File processing error in main process:", err);
+      
+      // Provide more specific error information
+      let errorMessage = "Unknown error occurred during file processing";
+      
+      if (err.message) {
+        if (err.message.includes("Worker terminated")) {
+          errorMessage = "File processing worker crashed - this may be due to memory issues or corrupted files";
+        } else if (err.message.includes("ENOENT") || err.message.includes("no such file")) {
+          errorMessage = "Directory or files not found - please check the selected path";
+        } else if (err.message.includes("EACCES") || err.message.includes("permission")) {
+          errorMessage = "Permission denied - unable to read files in the selected directory";
+        } else if (err.message.includes("network") || err.message.includes("ECONNREFUSED")) {
+          errorMessage = "Failed to connect to the API server - please ensure the server is running";
+        } else {
+          errorMessage = err.message;
+        }
+      }
+
+      // Return an error result instead of throwing, so the UI can handle it gracefully
+      return {
+        allFiles: [],
+        validFiles: [],
+        smsFiles: [],
+        audioFiles: [],
+        audioCriFiles: [],
+        audioMetadataFiles: [],
+        validationErrors: [{
+          fileName: "System Error",
+          fileType: "system",
+          errors: [errorMessage],
+          isValid: false
+        }],
+        error: errorMessage
+      };
+    } finally {
+      // Always terminate worker pools
+      try {
+        pool.terminate();
+        listedFilesWorkerPool.terminate();
+        fileRecordWorkerPool.terminate();
+        criParserWorkerPool.terminate();
+        uploadWorkerPool.terminate();
+      } catch (terminationError) {
+        console.warn("Warning: Could not terminate some worker pools:", terminationError);
+      }
     }
   }
 );

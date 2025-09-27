@@ -19,15 +19,22 @@ export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
         
-        const response = await fetch(`${baseUrl}/api/health`, {
+        // Try to fetch from a known working endpoint instead of health
+        const response = await fetch(`${baseUrl}/api/file-uploads?take=1`, {
           method: 'GET',
           signal: controller.signal
         });
         
         clearTimeout(timeoutId);
-        setIsOnline(response.ok);
-      } catch (error) {
-        setIsOnline(false);
+        setIsOnline(response.ok || response.status < 500); // Consider 4xx as "online but error"
+      } catch (error: any) {
+        console.log('API status check failed:', error.message);
+        // For CORS errors, consider the API as potentially online
+        if (error.name === 'TypeError' && error.message.includes('CORS')) {
+          setIsOnline(true); // API is likely running but CORS is blocking
+        } else {
+          setIsOnline(false);
+        }
       } finally {
         setIsChecking(false);
       }

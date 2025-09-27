@@ -150,15 +150,38 @@ export const createFileDetails = async (
       isRead: true,
     };
 
+    console.log(`Creating file details for: ${file.name} (contextId: ${contextId})`);
+    
     const fileDetails = await axios.post(
       `${process.env.VITE_WEB_APP_PROXY_URL}/file-uploads`,
       body
     );
-    if (fileDetails.status) {
+    
+    if (fileDetails.status === 200 || fileDetails.status === 201) {
+      console.log(`Successfully created file details for: ${file.name}`);
       return fileDetails.data;
+    } else {
+      console.warn(`Unexpected status code ${fileDetails.status} for file: ${file.name}`);
+      throw new Error(`API returned unexpected status: ${fileDetails.status}`);
     }
-  } catch (error) {
-    console.log(error);
+  } catch (error: any) {
+    console.error(`Failed to create file details for ${file.name}:`, error);
+    
+    // Provide specific error information based on the error type
+    if (error.response) {
+      // API returned an error response
+      const status = error.response.status;
+      const statusText = error.response.statusText;
+      const errorMessage = error.response.data?.message || error.response.data?.error || statusText;
+      
+      throw new Error(`API Error (${status}): ${errorMessage} for file: ${file.name}`);
+    } else if (error.request) {
+      // Request was made but no response received
+      throw new Error(`Network Error: Unable to connect to API server while processing file: ${file.name}`);
+    } else {
+      // Something else happened
+      throw new Error(`Processing Error: ${error.message} for file: ${file.name}`);
+    }
   }
 };
 export const listAndClassifyFiles = async (
@@ -172,12 +195,16 @@ export const listAndClassifyFiles = async (
   audioMetadataFiles: any[];
   validFiles: any[];
   validationErrors: any[];
+  error?: string;
 }> => {
-  const filenames = await fs.promises.readdir(dirPath);
-  const results: any[] = [];
-  const smsFiles: any[] = [];
-  const audioFiles: any[] = [];
-  const audioCriFiles: any[] = [];
+  try {
+    console.log(`Starting file processing for directory: ${dirPath} (contextId: ${contextId})`);
+    
+    const filenames = await fs.promises.readdir(dirPath);
+    const results: any[] = [];
+    const smsFiles: any[] = [];
+    const audioFiles: any[] = [];
+    const audioCriFiles: any[] = [];
 
   await Promise.all(
     filenames.map((file: any) =>
@@ -214,16 +241,26 @@ export const listAndClassifyFiles = async (
           };
 
           let fileDetails: any = null;
+          let fileDetailsError: string | null = null;
+          
           if (
             (metaData != null &&
               metaData?.data?.callType?.toUpperCase() === "SMS") ||
             type === "audio"
           ) {
-            fileDetails = await createFileDetails(
-              fileData,
-              fullPath,
-              contextId
-            );
+            try {
+              fileDetails = await createFileDetails(
+                fileData,
+                fullPath,
+                contextId
+              );
+              console.log(`Successfully created file details for: ${file}`);
+            } catch (error: any) {
+              console.error(`Failed to create file details for ${file}:`, error);
+              fileDetailsError = error.message;
+              // Don't throw here, continue processing other files
+              // The error will be included in the validation errors
+            }
           }
 
           const enriched = {
@@ -233,6 +270,7 @@ export const listAndClassifyFiles = async (
             metaData: metaData
               ? { ...createApiMetadata(metaData?.data) }
               : null,
+            fileDetailsError, // Include any error from createFileDetails
           };
 
           results.push(enriched);
@@ -270,6 +308,17 @@ export const listAndClassifyFiles = async (
 
   // Validate SMS files
   for (const smsFile of smsFiles) {
+    // Check if there was an error creating file details
+    if (smsFile.fileDetailsError) {
+      validationErrors.push({
+        fileName: smsFile.name,
+        fileType: "text",
+        errors: [`API Error: ${smsFile.fileDetailsError}`],
+        isValid: false
+      });
+      continue;
+    }
+
     if (smsFile.metaData) {
       const validation = await validateMetadata(
         smsFile.metaData,
@@ -294,6 +343,17 @@ export const listAndClassifyFiles = async (
 
   // Validate audio files with their CRI files
   for (const audioFile of audioMetadataFiles) {
+    // Check if there was an error creating file details
+    if (audioFile.fileDetailsError) {
+      validationErrors.push({
+        fileName: audioFile.name,
+        fileType: "audio",
+        errors: [`API Error: ${audioFile.fileDetailsError}`],
+        isValid: false
+      });
+      continue;
+    }
+
     if (audioFile.metaData) {
       const criFile = audioCriFiles.find(
         (item) => item?.metaDataRaw?.data?.fileName === audioFile.name
@@ -323,6 +383,8 @@ export const listAndClassifyFiles = async (
   // Only include files with valid metadata in validFiles
   const validFiles = [...validSmsFiles, ...validAudioFiles];
 
+  console.log(`File processing completed. Total files: ${results.length}, Valid files: ${validFiles.length}, Errors: ${validationErrors.length}`);
+
   return {
     allFiles: results,
     smsFiles,
@@ -332,6 +394,21 @@ export const listAndClassifyFiles = async (
     validFiles,
     validationErrors,
   };
+  } catch (error: any) {
+    console.error(`Critical error in listAndClassifyFiles for directory ${dirPath}:`, error);
+    
+    // Return a structured error response
+    return {
+      allFiles: [],
+      smsFiles: [],
+      audioFiles: [],
+      audioCriFiles: [],
+      audioMetadataFiles: [],
+      validFiles: [],
+      validationErrors: [],
+      error: `File processing failed: ${error.message}`,
+    };
+  }
 };
 
 workerpool.worker({
