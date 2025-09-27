@@ -1,4 +1,9 @@
-import { CallLogEntry, ParseResult } from "../types/common";
+import {
+  CallLogEntry,
+  FileRecordMetadata,
+  IMetadata,
+  ParseResult,
+} from "../types/common";
 import { CIR_EXPECTED_KEYS } from "./constants";
 import * as Yup from "yup";
 
@@ -168,9 +173,94 @@ export const getValidISOStringFromCri = (
 
   return !isNaN(d.getTime()) ? d.toISOString() : new Date(dateVal);
 };
-export const getFileType = (file: File): "audio" | "text" => {
+
+const call_directions = [
+  {
+    keyword: "call_direction_type",
+    value: "INCOMING",
+    uuid: "6aacaec3-6b25-492e-8558-097078417aea",
+  },
+  {
+    keyword: "call_direction_type",
+    value: "OUTGOING",
+    uuid: "5b5fe700-2791-4892-ad53-0bee86e95aa7",
+  },
+];
+
+export const createApiMetadata = (metadata: IMetadata) => {
+  if (!metadata) return null;
+
+  if (metadata?.callType?.toUpperCase() === "VOICE") {
+    // Audio file metadata structure
+    return {
+      targetNumber: metadata?.targetNumber,
+      target_code: metadata?.targetName,
+      call_start:
+        metadata?.startTime &&
+        !isNaN(
+          new Date(
+            getValidISOStringFromCri(metadata?.startTime) || ""
+          ).getTime()
+        )
+          ? new Date(getValidISOStringFromCri(metadata?.startTime) || "")
+          : undefined,
+      call_end:
+        metadata?.endTime &&
+        !isNaN(
+          new Date(getValidISOStringFromCri(metadata?.endTime) || "").getTime()
+        )
+          ? new Date(getValidISOStringFromCri(metadata?.endTime) || "")
+          : undefined,
+      direction: call_directions.find(
+        (dir) => dir.value === metadata?.direction.toUpperCase()
+      )?.uuid,
+      caller: metadata?.calledNumber,
+      callee: metadata?.callingNumber,
+      imei: metadata?.imeiA,
+      imsi: metadata?.imsiA,
+      cell_id_start: metadata?.cellIdA,
+      cell_id_end: metadata?.cellIdB,
+
+      cell_address_start: metadata?.cellAddressA,
+      cell_address_end: metadata?.cellAddressB,
+
+      latitude_longitude_start: metadata?.latitudeA
+        ? `${metadata.latitudeA},${metadata.longitudeA}`
+        : undefined,
+      latitude_longitude_end: metadata?.latitudeB
+        ? `${metadata.latitudeB},${metadata.longitudeB}`
+        : undefined,
+    };
+  } else {
+    // SMS/Text file metadata structure
+    return {
+      targetNumber: metadata?.targetNumber,
+      target_code: metadata?.targetName,
+      sender: metadata?.calledNumber,
+      receiver: metadata?.callingNumber,
+      sms_datetime:
+        metadata?.startTime &&
+        !isNaN(
+          new Date(
+            getValidISOStringFromCri(metadata?.startTime) || ""
+          ).getTime()
+        )
+          ? new Date(getValidISOStringFromCri(metadata?.startTime) || "")
+          : undefined,
+      imei: metadata?.imeiB,
+      imsi: metadata?.imsiB,
+      direction: call_directions.find(
+        (dir) => dir.value === metadata?.direction.toUpperCase()
+      )?.uuid,
+      latitude: metadata?.latitudeB,
+      longitude: metadata?.longitudeB,
+      message: metadata?.messageContent,
+    };
+  }
+};
+export const getFileType = (fileName: string): "audio" | "text" => {
   const audioExtensions = ["mp3", "wav", "mp4", "m4a"];
-  const extension = file?.name?.split(".").pop()?.toLowerCase() || "";
+  const extension = fileName?.split(".").pop()?.toLowerCase() || "";
   return audioExtensions.includes(extension) ? "audio" : "text";
 };
 

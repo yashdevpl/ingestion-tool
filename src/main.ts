@@ -1,7 +1,12 @@
 import { app, BrowserWindow, dialog, shell, ipcMain } from "electron";
 import path from "node:path";
+import fs from "node:fs";
 import started from "electron-squirrel-startup";
 import workerpool from "workerpool";
+import { createUploadContext } from "./utils/helper-functions";
+// Import worker path
+const isDevelopment = process.env.NODE_ENV === "development";
+const uploadWorker = path.join(__dirname, "uploadWorker.js");
 
 if (started) {
   app.quit();
@@ -21,6 +26,12 @@ if (process.defaultApp) {
 }
 
 const createWindow = () => {
+  const userDataPath = app.getPath("userData");
+  const cachePath = path.join(userDataPath, "Cache");
+
+  app.commandLine.appendSwitch("disk-cache-dir", cachePath);
+  app.commandLine.appendSwitch("disable-gpu-shader-disk-cache");
+
   mainWindow = new BrowserWindow({
     width: 800,
     height: 600,
@@ -184,6 +195,13 @@ if (process.platform === "win32" || process.platform === "linux") {
 // initialization and is ready to create browser windows.
 // Some APIs can only be used after this event occurs.
 app.on("ready", () => {
+  // Ensure cache directory exists
+  const userDataPath = app.getPath("userData");
+  const cachePath = path.join(userDataPath, "Cache");
+  if (!fs.existsSync(cachePath)) {
+    fs.mkdirSync(cachePath, { recursive: true });
+  }
+
   createWindow();
 
   // Handle opening external URLs
@@ -237,17 +255,111 @@ ipcMain.handle("select-directory", async () => {
   return null;
 });
 
-// IPC to read files using worker
-ipcMain.handle("list-files", async (_event, dirPath: string) => {
-  const workerPath = path.join(__dirname, "fileWorker.js");
-  const pool = workerpool.pool(workerPath, { maxWorkers: 2 });
-  try {
-    const files = await pool.exec("readFiles", [dirPath]);
-    pool.terminate();
-    return files;
-  } catch (err) {
-    console.error(err);
-    pool.terminate();
-    return [];
-  }
+ipcMain.handle("create-upload-context", async () => {
+  const contextDetails = await createUploadContext();
+  return contextDetails;
 });
+
+// Handle file upload confirmation
+ipcMain.handle("confirm-file-upload", async (_event, files: any[]) => {
+  if (!mainWindow) return { confirmed: false };
+
+  const result = await dialog.showMessageBox(mainWindow, {
+    type: "question",
+    buttons: ["Cancel", "Upload"],
+    defaultId: 1,
+    title: "Confirm Upload",
+    message: "Would you like to proceed with uploading these files?",
+    detail: `Total files to upload: ${files.length}`,
+  });
+
+  return { confirmed: result.response === 1 };
+});
+
+// Handle file uploads
+ipcMain.handle(
+  "upload-files",
+  async (_event, files: any[], contextId: number) => {
+    try {
+      // Initialize upload worker pool
+      const uploadWorkerPool = workerpool.pool(uploadWorker, {
+        maxWorkers: 2,
+      });
+
+      // Execute upload with progress handling
+      const result = await uploadWorkerPool.exec("uploadFiles", [files], {
+        on: (payload) => {
+          if (
+            payload.type === "progress" &&
+            mainWindow &&
+            !mainWindow.isDestroyed()
+          ) {
+            mainWindow.webContents.send("upload-progress", payload.data);
+          }
+        },
+      });
+
+      // Clean up
+      uploadWorkerPool.terminate();
+
+      return result;
+    } catch (err) {
+      console.error("Upload error:", err);
+      return {
+        successful: [],
+        failed: files.map((f) => f.fileId),
+        total: files.length,
+        processedAudio: 0,
+        processedSMS: 0,
+        errors: [(err as Error).message],
+      };
+    }
+  }
+);
+
+// IPC to read files using worker
+ipcMain.handle(
+  "list-files",
+  async (_event, dirPath: string, contextId: number) => {
+    const workerPath = path.join(__dirname, "fileWorker.js");
+    const listedFilesWorker = path.join(__dirname, "listAndClassifyFiles.js");
+    const fileRecordWorker = path.join(__dirname, "fileRecordWorker.js");
+    const criParserWorker = path.join(__dirname, "criParserWorker.js");
+
+    const pool = workerpool.pool(workerPath, { maxWorkers: 2 });
+    const listedFilesWorkerPool = workerpool.pool(listedFilesWorker, {
+      maxWorkers: 4,
+    });
+
+    const fileRecordWorkerPool = workerpool.pool(fileRecordWorker, {
+      maxWorkers: 4,
+    });
+
+    const criParserWorkerPool = workerpool.pool(criParserWorker, {
+      maxWorkers: 4,
+    });
+
+    const uploadWorkerPool = workerpool.pool(uploadWorker, {
+      maxWorkers: 2,
+    });
+
+    try {
+      const listedFiles = await listedFilesWorkerPool.exec(
+        "listAndClassifyFiles",
+        [dirPath, contextId]
+      );
+      // const { validFiles, audioMetadataFiles, files } =
+      //   await criParserWorkerPool.exec("readCRIFiles", [listedFiles]);
+      // const newFileRecords = await fileRecordWorkerPool.exec(
+      //   "createFileMetadataList",
+      //   [validFiles, CRITextToObjList]
+      // );
+
+      return listedFiles;
+    } catch (err) {
+      console.error(err);
+      pool.terminate();
+      return [];
+    }
+  }
+);

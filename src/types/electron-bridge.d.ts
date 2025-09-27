@@ -27,16 +27,31 @@ export interface FileListResult {
   audioCriFiles: FileRecord[];
   audioMetadataFiles: FileRecord[];
   totalFiles?: number;
+  validationErrors?: Array<{
+    fileName: string;
+    fileType: "audio" | "text";
+    criFileName?: string;
+    errors: string[];
+    isValid: boolean;
+  }>;
+}
+
+export interface FileStatusItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  uploadDate?: string;
+  ingestionDate?: string;
+  status: 'uploaded' | 'ingested' | 'failed';
+  fileType: string;
+  errorMessage?: string;
 }
 
 export interface ElectronBridge {
   selectDirectory: () => Promise<string | null>;
   listFiles: (dirPath: string, contextId: number) => Promise<FileListResult>;
   createUploadContext: () => Promise<UploadContext>;
-  uploadFiles: (
-    files: FileRecord[],
-    contextId: number
-  ) => Promise<UploadResult>;
+  uploadFiles: (files: FileRecord[], contextId: number) => Promise<UploadResult>;
   onUploadProgress: (callback: (progress: UploadProgress) => void) => void;
   removeUploadProgressListener: () => void;
   confirmFileUpload: (files: FileRecord[]) => Promise<void>;

@@ -1,34 +1,34 @@
-import axios from "axios";
-import { useFormik } from "formik";
-import { Upload } from "lucide-react";
+import { ChevronDown, Filter, Search, Upload, X } from "lucide-react";
 import type React from "react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 
-import { usePolling } from "../hooks/use-polling";
 import { useToast } from "../hooks/use-toast";
-import { Label } from "./ui/label";
-
-import { useFiltersContext } from "../context/filters-context";
-import { useUploadStatus } from "../context/upload-status-context";
-import type { FileRecord, ParseResult } from "../types/common";
 import {
-  createMetadataValidationSchema,
-  getFileType,
-  getValidISOStringFromCri,
-  parseCallLogFile,
-  validationSchemaForm,
-} from "../utils/conversion";
+  Accordion,
+  AccordionContent,
+  AccordionItem,
+  AccordionTrigger,
+} from "./ui/accordion";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "./ui/dialog";
+
+import { useFilePolling } from "../hooks/use-file-polling";
+import type { FileRecord } from "../types/common";
+import { ElectronBridge } from "../types/electron-bridge";
 import { Button } from "./ui/button";
 import { FileItem } from "./upload-form/FileItems";
+import { ReadingFilesDialog } from "./upload-form/ReadingFilesDialog";
+import { VirtualizedFileList } from "./upload-form/VirtualizedFileList";
 
 declare global {
   interface Window {
-    electronAPI: {
-      selectDirectory: () => Promise<string | null>;
-      listFiles: (
-        dirPath: string
-      ) => Promise<{ validFiles: FileRecord[]; newFileRecords: FileRecord[] }>;
-    };
+    electronAPI: ElectronBridge;
   }
 }
 
@@ -38,915 +38,1014 @@ interface PollingData {
   trackingCode?: string;
   trackedNumber?: string;
 }
-
-// Main Component
+// Main component
 const UploadRecordForm: React.FC = () => {
   const [fileRecords, setFileRecords] = useState<FileRecord[]>([]);
   const [uploadedFilesList, setUploadedFilesList] = useState<FileRecord[]>([]);
-  const { getFilteredTypes } = useFiltersContext();
-  const callsDirectionStatus = getFilteredTypes("call_direction_type");
-  const [directory, setDirPath] = useState("");
+  const [contextId, setContextId] = useState<number>(0);
+  const [dirPath, setDirPath] = useState("");
+  const [processingLoader, setProcessingLoader] = useState(false);
   const [dragOver, setDragOver] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [validationErrors, setValidationErrors] = useState<
     Record<string, Record<string, string>>
   >({});
+  const [fileValidationErrors, setFileValidationErrors] = useState<any[]>([]);
+  const [expandedErrorItems, setExpandedErrorItems] = useState<Set<string>>(
+    new Set()
+  );
+  const [uploadError, setUploadError] = useState<{
+    message: string;
+    apiType: "SMS" | "Call" | "System";
+    failedCount: number;
+    failedFiles?: any[]; // Store failed files for retry
+  } | null>(null);
+
+  // New state for filtering and searching
+  const [searchTerm, setSearchTerm] = useState("");
+  const [statusFilter, setStatusFilter] = useState("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [sortBy, setSortBy] = useState("name");
+  const [sortOrder, setSortOrder] = useState("asc");
+  const [isReadingFiles, setIsReadingFiles] = useState(false);
+  const [readFilesData, setReadFilesData] = useState<{
+    smsFiles: number;
+    audioFiles: number;
+    audioCriFiles: number;
+    audioMetadataFiles: number;
+    totalFiles: number;
+    dirPath: string;
+    validationErrors?: any[];
+    totalErrors?: number;
+  } | null>(null);
+
   const { toast } = useToast();
+  const { data, loading, error, start, stop, isActive } = useFilePolling<
+    FileRecord[]
+  >({
+    url: `http://localhost:3001/api/file-uploads`,
+    interval: 4000,
+  });
+  // Simplified upload function with basic error handling
+  const startUpload = async (files: FileRecord[]) => {
+    console.log("startUpload called with files:", files);
+    console.log("startUpload contextId:", contextId);
 
-  const { startPolling, stopPolling } = usePolling<PollingData>();
-  const {
-    uploadStatus,
-    updateUploadStatus,
-    resetUploadStatus,
-    stopPolling: stopPollingStatus,
-  } = useUploadStatus();
+    setUploadError(null); // Clear previous errors
 
-  const createApiMetadata = (fileRecord: FileRecord) => {
-    const metadata = fileRecord.metadata;
-    // Helper to check valid date
-    const getValidISOString = (dateVal: any) => {
-      if (!dateVal) return undefined;
-      const d = new Date(dateVal);
-      return !isNaN(d.getTime()) ? d.toISOString() : undefined;
-    };
+    // Setup progress listener
+    window.electronAPI.onUploadProgress((progress) => {
+      console.log("Upload progress:", progress);
+    });
 
-    if (fileRecord.type === "audio") {
-      // Audio file metadata structure
-      return {
-        targetNumber: metadata?.targetNumber,
-        target_code: metadata?.trackingCode,
-        call_start: getValidISOString(metadata?.startTime),
-        call_end: getValidISOString(metadata?.endTime),
-        direction: metadata?.direction,
-        caller: metadata?.caller,
-        callee: metadata?.callee,
-        imei: metadata?.imei,
-        imsi: metadata?.imsi,
-        cell_id_start: metadata?.startCellId,
-        cell_id_end: metadata?.endCellId,
+    try {
+      console.log("Calling window.electronAPI.uploadFiles...");
+      const result = await window.electronAPI.uploadFiles(files, contextId);
+      console.log("Upload result received:", result);
 
-        cell_address_start: metadata?.startCellAddress,
-        cell_address_end: metadata?.endCellAddress,
-
-        latitude_longitude_start: metadata?.startCellLatitude
-          ? `${metadata.startCellLatitude},${metadata.startCellLongitude}`
-          : undefined,
-        latitude_longitude_end: metadata?.endCellLatitude
-          ? `${metadata.endCellLatitude},${metadata.endCellLongitude}`
-          : undefined,
-      };
-    } else {
-      // SMS/Text file metadata structure
-      return {
-        targetNumber: metadata?.targetNumber,
-        target_code: metadata?.trackingCode,
-        sender: metadata?.caller,
-        receiver: metadata?.callee,
-        sms_datetime: getValidISOString(metadata?.startTime),
-        imei: metadata?.imei,
-        imsi: metadata?.imsi,
-        direction: metadata?.direction,
-        latitude: metadata?.startCellLatitude,
-        longitude: metadata?.startCellLongitude,
-        message: metadata?.message,
-      };
-    }
-  };
-  const formik = useFormik({
-    initialValues: {
-      trackingNumber: "",
-      files: [] as File[],
-    },
-    validationSchema: validationSchemaForm,
-    onSubmit: async (values) => {
-      const errors: Record<string, Record<string, string>> = {};
-      let hasErrors = false;
-
-      // Validate all file metadata
-      for (const fileRecord of fileRecords) {
-        try {
-          if (fileRecord.isReferenceFound) {
-            const validationSchema = createMetadataValidationSchema(
-              fileRecord.type || "audio"
-            );
-            await validationSchema.validate(fileRecord.metadata, {
-              abortEarly: false,
-            });
-          }
-        } catch (validationError: any) {
-          errors[fileRecord.id] = {};
-          validationError.inner.forEach((error: any) => {
-            errors[fileRecord.id][error.path] = error.message;
-          });
-          hasErrors = true;
+      // Handle successful uploads
+      if (result.successful.length > 0) {
+        const successMsg = [];
+        if (result.processedAudio > 0) {
+          successMsg.push(`${result.processedAudio} audio files`);
         }
-      }
+        if (result.processedSMS > 0) {
+          successMsg.push(`${result.processedSMS} SMS files`);
+        }
 
-      setValidationErrors(errors);
-
-      if (hasErrors) {
         toast({
-          title: "Please fill required fields",
-          description: "Please fill in all required fields for each file.",
-          variant: "destructive",
+          title: "Upload Complete",
+          description: `Successfully uploaded ${successMsg.join(" and ")}`,
         });
-        return;
       }
 
-      setIsSubmitting(true);
-
-      try {
-        // Separate files by type
-        const audioFiles = fileRecords.filter(
-          (item) => item.type === "audio" && item.isReferenceFound
+      // Handle failed uploads with simplified error info
+      if (result.failed.length > 0) {
+        // Group failed files by API endpoint to determine which API actually failed
+        const failedByApi = result.failed.reduce(
+          (acc: Record<string, number>, failedFile: any) => {
+            const apiType = failedFile.apiEndpoint || "unknown";
+            acc[apiType] = (acc[apiType] || 0) + 1;
+            return acc;
+          },
+          {}
         );
-        const smsFiles = fileRecords.filter(
-          (item) => item.type !== "audio" && item.isReferenceFound
+
+        // Determine the primary failing API (the one with more failures)
+        const primaryFailingApi = Object.keys(failedByApi).reduce((a, b) =>
+          failedByApi[a] > failedByApi[b] ? a : b
         );
 
-        const responses = [];
-
-        // Process audio files if any exist
-        if (audioFiles.length > 0) {
-          const formDataCalls = new FormData();
-          formDataCalls.append("target_number", values.trackingNumber);
-
-          audioFiles.forEach((fileRecord, index) => {
-            formDataCalls.append(`file_${index}`, fileRecord.file);
-            const apiMetadata = createApiMetadata(fileRecord);
-            formDataCalls.append(
-              `metadata_${index}`,
-              JSON.stringify(apiMetadata)
-            );
-          });
-
-          formDataCalls.append("file_count", audioFiles.length.toString());
-
-          const config = { headers: { "Content-Type": "multipart/form-data" } };
-
-          try {
-            const callsResponse = await axios.post(
-              "http://192.168.1.12:3000/api/ingestion",
-              formDataCalls,
-              config
-            );
-            responses.push({
-              type: "audio",
-              response: callsResponse,
-              files: audioFiles,
-            });
-          } catch (error: any) {
-            console.error("Audio files upload error:", error);
-            throw new Error(
-              error?.response?.data?.error?.message
-                ? error.response.data.error.message
-                : "Failed to upload audio files"
-            );
-          }
+        let apiType: "SMS" | "Call" | "System" = "System";
+        if (primaryFailingApi === "call") {
+          apiType = "Call";
+        } else if (primaryFailingApi === "sms") {
+          apiType = "SMS";
         }
 
-        // Process SMS files if any exist
-        if (smsFiles.length > 0) {
-          const formDataSms = new FormData();
-          formDataSms.append("target_number", values.trackingNumber);
+        // Get the first error message as representative
+        const firstError: any = result.failed[0];
+        const errorMessage =
+          firstError.error ||
+          firstError.message ||
+          "Upload failed with unknown error";
 
-          smsFiles.forEach((fileRecord, index) => {
-            formDataSms.append(`file_${index}`, fileRecord.file);
-            const apiMetadata = createApiMetadata(fileRecord);
-            formDataSms.append(
-              `metadata_${index}`,
-              JSON.stringify(apiMetadata)
-            );
-          });
-
-          formDataSms.append("file_count", smsFiles.length.toString());
-
-          const config = { headers: { "Content-Type": "multipart/form-data" } };
-
-          try {
-            const smsResponse = await axios.post(
-              "http://192.168.1.12:3000/api/ingestion/sms",
-              formDataSms,
-              config
-            );
-            responses.push({
-              type: "sms",
-              response: smsResponse,
-              files: smsFiles,
-            });
-          } catch (error) {
-            console.error("SMS files upload error:", error);
-            throw new Error("Failed to upload SMS files");
-          }
-        }
-
-        // Process responses and update file records
-        const allRequestIds: any[] = [];
-
-        for (const { type, response, files } of responses) {
-          if (!response?.data) {
-            throw new Error(`Invalid response for ${type} files`);
-          }
-
-          const result = response.data;
-
-          if (result.stored?.success && result.stored?.data?.requestIds) {
-            const requestIds = result.stored.data.requestIds;
-
-            // Map request IDs back to the original files
-            files.forEach((fileRecord, index) => {
-              const requestData = requestIds[index];
-              if (requestData) {
-                allRequestIds.push({
-                  fileId: fileRecord.id,
-                  requestId: requestData.requestId,
-                  trackingCode: requestData.trackingCode,
-                  fileType: type,
-                  fileName: fileRecord.file.name,
-                });
-              }
-            });
-          } else {
-            throw new Error(
-              `Upload failed for ${type} files: ${
-                result.message || "Unknown error"
-              }`
-            );
-          }
-        }
-
-        // Helper function to determine if polling should continue based on file type and status
-        const shouldContinuePolling = (status: string, fileType: string) => {
-          console.log(
-            `Checking polling continuation - Status: ${status}, FileType: ${fileType}`
-          );
-
-          if (fileType === "audio") {
-            // Audio files continue until keyword detection is complete or fails
-            const audioFinalStates = [
-              "KEYWORD_DETECTION_COMPLETE",
-              "FAILED",
-              "FILE_UPLOAD_FAILED",
-              "PROCESSING_FAILED",
-              "KEYWORD_DETECTION_FAILED",
-            ];
-            return !audioFinalStates.includes(status) && status !== "";
-          } else {
-            // SMS files stop at FILE_UPLOADED or any failure state
-            const smsFinalStates = [
-              "COMPLETED",
-              "FAILED",
-              "FILE_UPLOAD_FAILED",
-            ];
-            return !smsFinalStates.includes(status) && status !== "";
-          }
-        };
-
-        // Update file records with request IDs and start polling
-        if (allRequestIds.length > 0) {
-          setFileRecords((prev) =>
-            prev.map((fileRecord) => {
-              const requestInfo = allRequestIds.find(
-                (req) => req.fileId === fileRecord.id
-              );
-
-              if (requestInfo) {
-                const updatedRecord = {
-                  ...fileRecord,
-                  requestId: requestInfo.requestId,
-                  trackingCode: requestInfo.trackingCode,
-                  status: "processing" as const,
-                  progress: 0,
-                };
-
-                // Start polling for this file
-                startPolling({
-                  key: requestInfo.requestId,
-                  pollingInterval: 3000,
-                  maxRetries: 5,
-                  pollingFunction: async () => {
-                    try {
-                      const endpoint =
-                        requestInfo?.fileType === "sms"
-                          ? `http://192.168.1.12:3000/api/ingestion/status/${requestInfo.requestId}/sms`
-                          : `http://192.168.1.12:3000/api/ingestion/status/${requestInfo.requestId}`;
-
-                      const statusResponse = await axios.get(endpoint);
-                      console.log(
-                        `Status response for ${requestInfo.fileType}:`,
-                        statusResponse.data
-                      );
-                      return statusResponse.data;
-                    } catch (error) {
-                      console.error(
-                        `Polling error for ${requestInfo.requestId}:`,
-                        error
-                      );
-                      throw error;
-                    }
-                  },
-                  shouldContinue: (data) => {
-                    console.log(
-                      `Checking polling continuation - Status: ${data.status}, FileType: ${requestInfo.fileType}`
-                    );
-                    const shouldContinue = shouldContinuePolling(
-                      data.status,
-                      requestInfo.fileType
-                    );
-
-                    // Calculate progress based on API status
-                    const progress =
-                      data.status === "FILE_UPLOADED"
-                        ? 20
-                        : data.status === "PROCESSING_STARTED"
-                          ? 40
-                          : data.status === "PROCESSING_COMPLETE"
-                            ? 60
-                            : data.status === "KEYWORD_DETECTION_STARTED"
-                              ? 80
-                              : data.status === "KEYWORD_DETECTION_COMPLETE" ||
-                                  data.status === "COMPLETED"
-                                ? 100
-                                : data.status.includes("FAILED")
-                                  ? 100
-                                  : 25;
-
-                    // Update status with the exact API status
-                    updateUploadStatus(requestInfo.requestId, {
-                      status: data.status,
-                      progress,
-                      fileName: requestInfo.fileName,
-                      error: data.status.includes("FAILED")
-                        ? "message" in data
-                          ? (data.message as string)
-                          : "Upload failed"
-                        : undefined,
-                    });
-
-                    return shouldContinue;
-                  },
-                  onSuccess: (data) => {
-                    console.log(
-                      `Polling success for ${requestInfo.fileType}:`,
-                      data
-                    );
-
-                    // Stop polling for final states
-                    if (
-                      !shouldContinuePolling(data.status, requestInfo.fileType)
-                    ) {
-                      console.log(
-                        `Stopping polling for ${requestInfo.fileType} - Final status: ${data.status}`
-                      );
-                      stopPolling(requestInfo.requestId);
-                    }
-                  },
-                  onError: (error) => {
-                    console.error("Polling error:", error);
-
-                    updateUploadStatus(requestInfo.requestId, {
-                      status: "error",
-                      progress: 100,
-                      error:
-                        error instanceof Error
-                          ? error.message
-                          : "Unknown error occurred",
-                    });
-                  },
-                });
-
-                return updatedRecord;
-              }
-              return fileRecord;
-            })
-          );
-
-          toast({
-            title: "Success",
-            description: `Files uploaded successfully! Processing ${audioFiles.length} audio files and ${smsFiles.length} SMS files...`,
-          });
-        } else {
-          throw new Error("No request IDs received from server");
-        }
-      } catch (error: any) {
-        console.error("Upload error:", error);
-
-        let errorMessage =
-          "There was an error uploading your files. Please try again.";
-
-        if (error.message) {
-          errorMessage = error.message;
-        } else if (error.response?.data?.message) {
-          errorMessage = error.response.data.message;
-        }
+        setUploadError({
+          message: errorMessage,
+          apiType,
+          failedCount: result.failed.length,
+          failedFiles: result.failed, // Store failed files for retry
+        });
 
         toast({
           title: "Upload Failed",
-          description: errorMessage,
+          description: `${result.failed.length} files failed to upload. ${apiType} API error detected.`,
           variant: "destructive",
         });
-
-        // Reset any failed states
-        setFileRecords((prev) =>
-          prev.map((record) => ({
-            ...record,
-            status: "failed" as const,
-            progress: 0,
-            requestId: undefined,
-          }))
-        );
-      } finally {
-        setIsSubmitting(false);
-      }
-    },
-  });
-
-  const validateFileMetadata = async (fileRecords: FileRecord[]) => {
-    const errors: Record<string, Record<string, string>> = {};
-    let hasErrors = false;
-
-    // Validate only files that have isReferenceFound = true
-    for (const fileRecord of fileRecords) {
-      // Skip validation for files without reference
-      if (!fileRecord.isReferenceFound) {
-        continue;
       }
 
-      try {
-        const validationSchema = createMetadataValidationSchema(
-          fileRecord.type || "audio"
-        );
-        await validationSchema.validate(fileRecord.metadata, {
-          abortEarly: false,
+      // Handle case where no files were processed
+      if (result.successful.length === 0 && result.failed.length === 0) {
+        toast({
+          title: "No Files Processed",
+          description:
+            "No files were found to upload. Please check your file selection.",
+          variant: "destructive",
         });
-      } catch (validationError: any) {
-        errors[fileRecord.id] = {};
-        validationError.inner.forEach((error: any) => {
-          errors[fileRecord.id][error.path] = error.message;
-        });
-        hasErrors = true;
       }
-    }
+    } catch (error: any) {
+      console.error("Upload error:", error);
 
-    return { errors, hasErrors };
-  };
-
-  const handleFileUpload = async (files: FileList | File[]) => {
-    // Filter files by type
-    const txtFilesList = Array.from(files).filter(
-      (file) => getFileType(file) === "text"
-    );
-    const audioFilesList = Array.from(files).filter(
-      (file) => getFileType(file) === "audio"
-    );
-    const SMSCriFileList: File[] = [];
-
-    // Parse CRI text files for metadata
-    const CRITextToObjList: ParseResult[] = await Promise.all(
-      txtFilesList.map(async (file) => {
-        const criText = await file.text();
-        const metaData = parseCallLogFile(criText, file.name);
-        if (metaData.data?.callType && metaData.data.callType === "SMS") {
-          SMSCriFileList.push(file);
-        }
-        return { ...metaData };
-      })
-    );
-
-    const validFiles = Array.from([...audioFilesList, ...SMSCriFileList]);
-
-    const newFileRecords: FileRecord[] = validFiles.map((file) => {
-      const metaData =
-        CRITextToObjList.find((obj) => obj.data.fileName === file.name)?.data ||
-        CRITextToObjList.find((obj) => obj.data.criFileName === file.name)
-          ?.data ||
-        {};
-
-      return {
-        isReferenceFound: CRITextToObjList.some(
-          (obj) =>
-            obj.data.fileName === file.name ||
-            obj.data.criFileName === file.name
-        ),
-        id: Math.random().toString(36).substr(2, 9),
-        file,
-        type: getFileType(file),
-        duration: getFileType(file) === "audio" ? "" : undefined,
-        metadata: {
-          targetNumber: metaData.targetNumber || "",
-          trackingCode: metaData.targetName || "",
-          caller: metaData.callingNumber || "",
-          callee: metaData.calledNumber || "",
-          direction:
-            callsDirectionStatus.find(
-              (status) =>
-                status.value.toLowerCase() ===
-                metaData.direction?.toLocaleLowerCase()
-            )?.uuid || "",
-          startTime:
-            metaData.startTime && !isNaN(new Date(metaData.startTime).getTime())
-              ? new Date(getValidISOStringFromCri(metaData.startTime) || "")
-              : undefined,
-          endTime:
-            metaData.endTime && !isNaN(new Date(metaData.endTime).getTime())
-              ? new Date(getValidISOStringFromCri(metaData.endTime) || "")
-              : undefined,
-          target_code: metaData.targetName,
-          call_start: getValidISOStringFromCri(metaData?.startTime),
-          call_end: getValidISOStringFromCri(metaData?.endTime),
-          imei: metaData.imeiA,
-          imsi: metaData.imsiA,
-          startCellId: metaData.cellIdA,
-          endCellId: metaData.cellIdB,
-          startCellAddress: metaData.cellAddressA,
-          endCellAddress: metaData.cellAddressB,
-          startCellLatitude: metaData.latitudeA,
-          endCellLatitude: metaData.latitudeB,
-          startCellLongitude: metaData.longitudeA,
-          endCellLongitude: metaData.longitudeB,
-          message: metaData.messageContent,
-        },
-      };
-    });
-    // Update file records and validate immediately
-    setFileRecords((prev) => {
-      const updatedRecords = [...prev, ...newFileRecords];
-
-      // Validate metadata for all files asynchronously
-      validateFileMetadata(updatedRecords).then(({ errors, hasErrors }) => {
-        setValidationErrors(errors);
-        if (hasErrors) {
-          toast({
-            title: "Missing Required Information",
-            description:
-              "Please fill in all required fields for the uploaded files.",
-            variant: "destructive",
-          });
-        }
+      setUploadError({
+        message: error.message || "Upload process failed unexpectedly",
+        apiType: "System",
+        failedCount: files.length,
       });
 
-      return updatedRecords;
+      toast({
+        title: "Upload Failed",
+        description: "Upload process failed. System error detected.",
+        variant: "destructive",
+      });
+    } finally {
+      // Clean up listener
+      window.electronAPI.removeUploadProgressListener();
+      setProcessingLoader(false);
+    }
+  };
+
+  // Retry function for failed uploads
+  const retryFailedUploads = async () => {
+    if (!uploadError?.failedFiles || uploadError.failedFiles.length === 0) {
+      toast({
+        title: "No files to retry",
+        description: "No failed files available for retry.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    // Clear the current error
+    setUploadError(null);
+    setProcessingLoader(true);
+
+    try {
+      // Find the original files that failed using fileId
+      const failedFileIds = uploadError.failedFiles.map((f) => f.fileId);
+      const filesToRetry = fileRecords.filter((file) =>
+        failedFileIds.includes(file.id)
+      );
+
+      if (filesToRetry.length === 0) {
+        toast({
+          title: "Files not found",
+          description:
+            "Failed files are no longer available in the current session.",
+          variant: "destructive",
+        });
+        setProcessingLoader(false);
+        return;
+      }
+
+      toast({
+        title: "Retrying upload",
+        description: `Retrying upload for ${filesToRetry.length} file${filesToRetry.length > 1 ? "s" : ""}...`,
+      });
+
+      console.log("Retry: Starting upload for files:", filesToRetry);
+      console.log("Retry: Context ID:", contextId);
+      console.log("Retry: Failed file IDs:", failedFileIds);
+
+      // Start polling like in the original upload flow
+      start(`contextId=${contextId.toString()}`);
+
+      // Use the same upload logic but only for failed files
+      await startUpload(filesToRetry);
+    } catch (error: any) {
+      console.error("Retry upload error:", error);
+      setUploadError({
+        message: error?.message || "Retry failed with unknown error",
+        apiType: "System",
+        failedCount: uploadError.failedFiles?.length || 0,
+        failedFiles: uploadError.failedFiles,
+      });
+
+      toast({
+        title: "Retry failed",
+        description:
+          error?.message || "An unexpected error occurred during retry",
+        variant: "destructive",
+      });
+
+      setProcessingLoader(false);
+    }
+  };
+
+  // Filter and sort files
+  const filteredAndSortedFiles = useMemo(() => {
+    let filtered = data || fileRecords;
+
+    // Apply search filter
+    if (searchTerm) {
+      filtered = filtered.filter((file) =>
+        file.fileName.toLowerCase().includes(searchTerm.toLowerCase())
+      );
+    }
+
+    // Apply status filter
+    if (statusFilter !== "all") {
+      filtered = filtered.filter((file) => {
+        switch (statusFilter) {
+          case "completed":
+            return file.isIngested;
+          case "processing":
+            return file.isUploaded && !file.isIngested;
+          case "pending":
+            return !file.isRead;
+          case "error":
+            return (
+              validationErrors[file.id] &&
+              Object.keys(validationErrors[file.id]).length > 0
+            );
+          default:
+            return true;
+        }
+      });
+    }
+
+    // Apply sorting with null checks
+    filtered.sort((a, b) => {
+      let comparison = 0;
+      switch (sortBy) {
+        case "name":
+          // Compare fileName with null check
+          comparison = (a.fileName || "").localeCompare(b.fileName || "");
+          break;
+        case "size":
+          // Compare fileSize as numbers with null check
+          const aSizeNum = parseInt(a.fileSize || "0", 10);
+          const bSizeNum = parseInt(b.fileSize || "0", 10);
+          comparison = aSizeNum - bSizeNum;
+          break;
+        case "date":
+          // Compare uploadedAt dates with null check
+          const aDate = a.uploadedAt ? new Date(a.uploadedAt).getTime() : 0;
+          const bDate = b.uploadedAt ? new Date(b.uploadedAt).getTime() : 0;
+          comparison = aDate - bDate;
+          break;
+        default:
+          comparison = 0;
+      }
+      return sortOrder === "asc" ? comparison : -comparison;
     });
 
-    formik.setFieldValue("files", [...formik.values.files, ...validFiles]);
-  };
+    return filtered;
+  }, [
+    data,
+    fileRecords,
+    searchTerm,
+    statusFilter,
+    sortBy,
+    sortOrder,
+    validationErrors,
+  ]);
+
+  const getStatusCounts = useMemo(() => {
+    const files = data || fileRecords;
+    return {
+      total: files.length,
+      completed: files.filter((f) => f.isIngested).length,
+      processing: files.filter((f) => f.isUploaded && !f.isIngested).length,
+      pending: files.filter((f) => !f.isRead).length,
+      error: files.filter(
+        (f) =>
+          validationErrors[f.id] &&
+          Object.keys(validationErrors[f.id]).length > 0
+      ).length,
+    };
+  }, [data, fileRecords, validationErrors]);
 
   const handleFileInput = async () => {
     const path = await window.electronAPI.selectDirectory();
-    if (path) {
-      setDirPath(path);
-      const fileList = await window.electronAPI.listFiles(path);
-      console.log({ fileList }, "__fileList");
-      setFileRecords((prev) => {
-        const updatedRecords = [...prev, ...fileList.newFileRecords];
+    setDirPath(path || "");
+  };
 
-        // Validate metadata for all files asynchronously
-        validateFileMetadata(updatedRecords).then(({ errors, hasErrors }) => {
-          setValidationErrors(errors);
-          if (hasErrors) {
+  const startFileProcessing = async (path: string) => {
+    const contextDetails = await window.electronAPI.createUploadContext();
+
+    try {
+      if (path && contextDetails?.id) {
+        setContextId(contextDetails.id);
+        setIsReadingFiles(true); // Show reading files dialog
+        setDirPath(path);
+
+        const fileList = await window.electronAPI.listFiles(
+          path,
+          contextDetails.id
+        );
+
+        // Process and display file summary
+        if (fileList) {
+          const summary = {
+            smsFiles: fileList.smsFiles.length,
+            audioFiles: fileList.audioFiles.length,
+            audioCriFiles: fileList.audioCriFiles.length,
+            audioMetadataFiles: fileList.audioMetadataFiles.length,
+            totalFiles: fileList.validFiles.length,
+            dirPath: path,
+            validationErrors: fileList.validationErrors || [],
+            totalErrors: (fileList.validationErrors || []).length,
+          };
+
+          // Set the file records for display
+          setFileRecords(fileList.validFiles);
+
+          // Store validation errors
+          setFileValidationErrors(fileList.validationErrors || []);
+
+          if (fileList.validFiles.length > 0) {
+            setReadFilesData(summary);
+          } else {
             toast({
-              title: "Missing Required Information",
-              description:
-                "Please fill in all required fields for the uploaded files.",
+              title: "No Valid Files",
+              description: "No valid files found in the selected directory",
               variant: "destructive",
             });
           }
-        });
-
-        return updatedRecords;
-      });
-
-      formik.setFieldValue("files", [
-        ...formik.values.files,
-        ...fileList.validFiles,
-      ]); // handleFileUpload(fileList);
-    }
-  };
-
-  const handleDrop = (e: React.DragEvent) => {
-    e.preventDefault();
-    setDragOver(false);
-    const files = e.dataTransfer.files;
-    handleFileUpload(files);
-  };
-  const deleteFile = (id: string) => {
-    setFileRecords((prev) => {
-      const updated = prev.filter((record) => record.id !== id);
-      const updatedFiles = updated.map((record) => record.file);
-      formik.setFieldValue("files", updatedFiles);
-
-      // Stop polling for deleted file and clean up upload status
-      const deletedRecord = prev.find((record) => record.id === id);
-      if (deletedRecord?.requestId) {
-        stopPolling(deletedRecord.requestId);
-        resetUploadStatus(deletedRecord.requestId);
-      }
-
-      return updated;
-    });
-
-    // Clear validation errors for deleted file
-    setValidationErrors((prev) => {
-      const updated = { ...prev };
-      delete updated[id];
-      return updated;
-    });
-  };
-
-  const updateFileMetadata = (
-    id: string,
-    metadata: any,
-    isReferenceFound: boolean
-  ) => {
-    let isMetaDataValid = false;
-    if (!isReferenceFound) {
-      const validateFileMetadata = createMetadataValidationSchema("audio");
-      isMetaDataValid = validateFileMetadata.isValidSync(metadata);
-    }
-    setFileRecords((prev) =>
-      prev.map((record) =>
-        record.id === id
-          ? {
-              ...record,
-              isReferenceFound: !record.isReferenceFound
-                ? isMetaDataValid
-                : record.isReferenceFound,
-              metadata,
-            }
-          : record
-      )
-    );
-
-    // Clear validation errors for this file when metadata is updated
-    setValidationErrors((prev) => {
-      const updated = { ...prev };
-      delete updated[id];
-      return updated;
-    });
-  };
-
-  // Reset form and clear all states
-  const resetForm = () => {
-    // Reset formik form state
-    formik.resetForm();
-    // Clear all file-related states
-    setFileRecords([]);
-    setUploadedFilesList([]); // Clear uploaded files list
-    setValidationErrors({});
-
-    // Stop polling and clear upload status for all files
-    const allFiles = [...fileRecords, ...uploadedFilesList];
-    allFiles.forEach((record) => {
-      if (record.requestId) {
-        stopPolling(record.requestId);
-        resetUploadStatus(record.requestId);
-      }
-    });
-
-    // Reset file input elements
-    const fileInputs = document.querySelectorAll('input[type="file"]');
-    fileInputs.forEach((input) => {
-      const fileInput = input as HTMLInputElement;
-      fileInput.value = "";
-    });
-  };
-  // Move completed files to uploadedFilesList and update fileRecords
-  const updateFileRecordList = useCallback(() => {
-    try {
-      // First, check if we have any status updates to process
-      const hasCompletedFiles = fileRecords.some((record) => {
-        const status = record.requestId
-          ? uploadStatus[record.requestId]?.status
-          : null;
-        return (
-          status === "KEYWORD_DETECTION_COMPLETE" || status === "COMPLETED"
-        );
-      });
-
-      if (!hasCompletedFiles) return;
-
-      // Process all files in a single batch
-      const { completedFiles, remainingFiles } = fileRecords.reduce(
-        (acc, record) => {
-          const status = record.requestId
-            ? uploadStatus[record.requestId]?.status
-            : null;
-          const isCompleted =
-            status &&
-            ((record.type === "audio" &&
-              status === "KEYWORD_DETECTION_COMPLETE") ||
-              (record.type === "text" && status === "COMPLETED"));
-
-          if (isCompleted) {
-            acc.completedFiles.push(record);
-          } else {
-            acc.remainingFiles.push(record);
-          }
-
-          return acc;
-        },
-        {
-          completedFiles: [] as FileRecord[],
-          remainingFiles: [] as FileRecord[],
         }
-      );
-
-      // Batch update both states if we have changes
-      if (completedFiles.length > 0) {
-        // Update uploaded files list, avoiding duplicates
-        setUploadedFilesList((prev) => {
-          const uniqueNewFiles = completedFiles.filter(
-            (file) => !prev.some((existing) => existing.id === file.id)
-          );
-          return [...prev, ...uniqueNewFiles];
-        });
-
-        // Update current files list
-        setFileRecords(remainingFiles);
-
-        console.log("Batch Update Summary:", {
-          completedFiles: completedFiles.map((f) => f.file.name),
-          remainingFiles: remainingFiles.map((f) => f.file.name),
-        });
       }
     } catch (error) {
-      console.error("Error updating file lists:", error);
+      console.log("File Processing Error:", error);
+      stop();
+      toast({
+        title: "Error",
+        description: "Failed to process files",
+        variant: "destructive",
+      });
+    } finally {
+      setIsReadingFiles(false);
+      setProcessingLoader(false);
     }
-  }, [JSON.stringify(fileRecords), uploadStatus]); // Only recreate when these dependencies change
-  // Process file status updates and move completed files to uploaded list
-  useEffect(() => {
-    // Only run if we have both files and status updates
-    if (fileRecords.length > 0 && Object.keys(uploadStatus).length > 0) {
-      // Debounce the update to prevent multiple rapid updates
-      const timeoutId = setTimeout(() => {
-        updateFileRecordList();
-      }, 300);
+  };
 
-      return () => clearTimeout(timeoutId);
-    }
-  }, [updateFileRecordList, JSON.stringify(fileRecords)]);
+  const renderFileItem = useCallback(
+    (fileRecord: FileRecord, index: number) => (
+      <FileItem
+        key={fileRecord.id}
+        fileRecord={fileRecord}
+        index={index}
+        onDelete={(id) => void 0}
+        onUpdateMetadata={() => void 0}
+        errors={validationErrors[fileRecord.id]}
+      />
+    ),
+    [validationErrors]
+  );
 
-  useEffect(() => {
-    if (stopPollingStatus) {
-      resetForm();
-    }
-  }, [stopPollingStatus]);
-  return (
-    <>
-      <div className="flex max-h-[100vh] w-full  flex-col overflow-hidden p-0">
-        {/* Fixed Header */}
-        <div className="flex-shrink-0 border-b border-slate-200 px-4 py-4 sm:px-6 sm:py-5">
-          <div className="flex items-center justify-between gap-3">
-            <div className="flex gap-2">
-              <div className="flex items-center gap-2.5 rounded-full border-2 border-dashed border-slate-200 bg-slate-100 p-2.5 sm:p-3.5">
-                <Upload className="h-4 w-4 text-slate-600 sm:h-5 sm:w-5" />
-              </div>
-              <div className="flex flex-col gap-0.5">
-                <div className="text-sm font-semibold text-slate-900 sm:text-base">
-                  Upload Files
+  // Files Summary Dialog
+  const FilesSummaryDialog = () => (
+    <Dialog open={readFilesData !== null} onOpenChange={() => null}>
+      <DialogContent className="sm:max-w-3xl max-h-[85vh] flex flex-col">
+        <DialogHeader className="flex-shrink-0">
+          <DialogTitle>Files Ready for Upload</DialogTitle>
+          <DialogDescription>
+            Found the following files in: {readFilesData?.dirPath}
+          </DialogDescription>
+        </DialogHeader>
+
+        {/* Scrollable Content Area */}
+        <div className="flex-1 overflow-y-auto py-4">
+          <div className="space-y-4">
+            {/* File Type Statistics */}
+            <div className="grid grid-cols-2 gap-4">
+              <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="text-sm text-slate-600 mb-1">SMS Files</div>
+                <div className="text-2xl font-semibold text-slate-900">
+                  {readFilesData?.smsFiles}
                 </div>
-                <p className="text-xs text-neutral-500 sm:text-sm">
-                  Add files for a target profile
-                </p>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="text-sm text-slate-600 mb-1">Audio Files</div>
+                <div className="text-2xl font-semibold text-slate-900">
+                  {readFilesData?.audioFiles}
+                </div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="text-sm text-slate-600 mb-1">
+                  Audio CRI Files
+                </div>
+                <div className="text-2xl font-semibold text-slate-900">
+                  {readFilesData?.audioCriFiles}
+                </div>
+              </div>
+              <div className="bg-slate-50 p-4 rounded-lg">
+                <div className="text-sm text-slate-600 mb-1">
+                  Audio with Metadata
+                </div>
+                <div className="text-2xl font-semibold text-slate-900">
+                  {readFilesData?.audioMetadataFiles}
+                </div>
               </div>
             </div>
-            {/* <button
-              type="button"
-              className="flex-shrink-0 rounded-full bg-slate-100 p-1.5 hover:bg-slate-200"
-            >
-              <X className="h-4 w-4 text-slate-600" />
-            </button> */}
-          </div>
-        </div>
 
-        {/* Scrollable Content */}
-        <div className="flex-1 overflow-y-auto">
-          <div className="px-4 py-4 sm:px-6 sm:py-6">
-            <div className="flex flex-col gap-4 sm:gap-6">
-              <div className="flex flex-col gap-4">
-                <div className="flex flex-col gap-0.5">
-                  <Label className="text-sm font-medium text-slate-900 sm:text-base">
-                    Add Files <span className="text-red-500">*</span>
-                  </Label>
-                  <p className="text-xs text-neutral-500 sm:text-sm">
-                    Browse files for selected tracking number
-                  </p>
+            {/* Total Files Summary */}
+            <div className="bg-blue-50 p-4 rounded-lg border border-blue-100">
+              <div className="flex justify-between items-center">
+                <div>
+                  <div className="text-sm text-blue-700 font-medium">
+                    Total Valid Files
+                  </div>
+                  <div className="text-xs text-blue-600 mt-1">
+                    Ready for upload
+                  </div>
                 </div>
+                <div className="text-3xl font-bold text-blue-700">
+                  {readFilesData?.totalFiles}
+                </div>
+              </div>
+            </div>
 
-                <div
-                  className={`flex items-center justify-center gap-2.5 rounded-lg border-2 border-dashed px-4 py-6 transition-colors sm:py-8 ${
-                    dragOver
-                      ? "border-blue-400 bg-blue-50"
-                      : "border-slate-200 hover:border-slate-300"
-                  }`}
-                  onDrop={handleDrop}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    setDragOver(true);
-                  }}
-                  onDragLeave={() => setDragOver(false)}
-                >
-                  <div className="flex flex-col items-center gap-3 text-center">
-                    <div className="rounded-full bg-neutral-100 p-2 sm:p-3">
-                      <Upload className="h-5 w-5 text-slate-600 sm:h-6 sm:w-6" />
+            {/* Validation Errors Section */}
+            {readFilesData?.totalErrors && readFilesData.totalErrors > 0 && (
+              <div className="bg-red-50 p-4 rounded-lg border border-red-100">
+                <div className="flex justify-between items-start mb-3">
+                  <div>
+                    <div className="text-sm text-red-700 font-medium">
+                      Validation Errors
                     </div>
-                    <div className="flex flex-col items-center gap-1">
-                      <p className="text-xs font-semibold text-slate-900 sm:text-sm">
-                        Drag and drop files here, or{" "}
-                        <label
-                          onClick={handleFileInput}
-                          className="cursor-pointer text-blue-600 hover:underline"
-                        >
-                          browse
-                        </label>
-                      </p>
-                      <p className="text-xs text-neutral-500">
-                        Call recording audio files, SMS text threads
-                      </p>
+                    <div className="text-xs text-red-600 mt-1">
+                      Files with metadata issues (will be skipped)
                     </div>
+                  </div>
+                  <div className="text-2xl font-bold text-red-700">
+                    {readFilesData.totalErrors}
                   </div>
                 </div>
 
-                {formik.touched.files && formik.errors.files && (
-                  <p className="text-xs text-red-500">
-                    {formik.errors.files as string}
-                  </p>
-                )}
-              </div>
+                {/* Scrollable Error Details with Accordion */}
+                <div className="max-h-40 overflow-y-auto border border-red-200 rounded-lg bg-white">
+                  <Accordion type="multiple" className="w-full">
+                    {readFilesData.validationErrors?.map((error, index) => (
+                      <AccordionItem
+                        key={index}
+                        value={`error-${index}`}
+                        className="border-b border-red-100 last:border-b-0"
+                      >
+                        <AccordionTrigger className="px-3 py-2.5 hover:bg-red-50 text-left [&[data-state=open]>svg]:rotate-180">
+                          <div className="flex items-center gap-2 flex-1">
+                            <div className="text-red-500 text-sm">⚠️</div>
+                            <div className="flex-1">
+                              <div className="text-sm font-medium text-red-800">
+                                {error.fileName}
+                                <span className="ml-2 px-1.5 py-0.5 bg-red-100 text-red-700 rounded text-xs">
+                                  {error.fileType}
+                                </span>
+                                {error.criFileName && (
+                                  <span className="ml-1 px-1.5 py-0.5 bg-orange-100 text-orange-700 rounded text-xs">
+                                    CRI: {error.criFileName}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="text-xs text-red-600 mt-1">
+                                {error.errors.length} error
+                                {error.errors.length > 1 ? "s" : ""} found
+                              </div>
+                            </div>
+                          </div>
+                        </AccordionTrigger>
+                        <AccordionContent className="px-3 pb-3">
+                          <div className="space-y-2">
+                            {error.errors.map(
+                              (errorMsg: string, errorIndex: number) => (
+                                <div
+                                  key={errorIndex}
+                                  className="flex items-start gap-2 p-2 bg-red-50 rounded text-xs"
+                                >
+                                  <div className="text-red-500 mt-0.5 flex-shrink-0">
+                                    •
+                                  </div>
+                                  <div className="text-red-700">{errorMsg}</div>
+                                </div>
+                              )
+                            )}
+                          </div>
 
-              {/* File List */}
-              {fileRecords.length > 0 && (
-                <>
-                  <div className="h-px bg-slate-200" />
+                          {/* File info */}
+                          <div className="mt-2 pt-2 border-t border-red-200">
+                            <div className="text-xs text-red-600">
+                              <strong>File:</strong> {error.fileName}
+                              <br />
+                              <strong>Type:</strong>{" "}
+                              {error.fileType === "audio"
+                                ? "Audio Call"
+                                : "SMS/Text"}
+                              <br />
+                              {error.criFileName && (
+                                <>
+                                  <strong>CRI File:</strong> {error.criFileName}
+                                  <br />
+                                </>
+                              )}
+                              <strong>Status:</strong>{" "}
+                              <span className="text-red-700 font-medium">
+                                Will be excluded from upload
+                              </span>
+                            </div>
+                          </div>
+                        </AccordionContent>
+                      </AccordionItem>
+                    ))}
+                  </Accordion>
+                </div>
 
-                  <div className="flex flex-col gap-4">
-                    {/* File Items - Scrollable Container */}
-                    <div className="max-h-96 w-full space-y-3 overflow-y-auto">
-                      {/* Filter out completed files and show only in-progress or failed files */}
-                      {fileRecords.map((fileRecord) => (
-                        <FileItem
-                          key={fileRecord.id}
-                          fileRecord={fileRecord}
-                          onDelete={deleteFile}
-                          onUpdateMetadata={updateFileMetadata}
-                          errors={validationErrors[fileRecord.id]}
-                        />
-                      ))}
-                      <div className="w-full border-b border-slate-200" />
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-col gap-4 p-4 sm:px-6">
-            {uploadedFilesList.length > 0 && (
-              <div className="text-center text-xs text-slate-500 italic">
-                Uploaded Files
+                <div className="mt-3 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+                  💡 <strong>Tip:</strong> These files have validation errors
+                  and will be automatically excluded from upload. You can still
+                  upload the valid files, or fix the metadata issues and try
+                  again later.
+                </div>
               </div>
             )}
-            {uploadedFilesList?.map((fileRecord) => (
-              <div className="max-h-40 w-full space-y-3 overflow-y-auto">
-                <FileItem
-                  key={fileRecord.id}
-                  fileRecord={fileRecord}
-                  onDelete={deleteFile}
-                  onUpdateMetadata={updateFileMetadata}
-                  errors={validationErrors[fileRecord.id]}
-                  showExpandButton={false}
-                />
+
+            {/* Estimated Time Calculation */}
+            <div className="bg-slate-50 p-4 rounded-lg">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="text-sm text-slate-700 font-medium">
+                    Estimated Upload Time
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    Based on file types and counts
+                  </div>
+                </div>
+                <div className="text-right">
+                  <div className="text-lg font-semibold text-slate-900">
+                    {(() => {
+                      // Average upload times in seconds per file
+                      const SMS_UPLOAD_TIME = 1; // 1 second per SMS file
+                      const AUDIO_UPLOAD_TIME = 5; // 5 seconds per audio file
+
+                      const totalSeconds =
+                        (readFilesData?.smsFiles || 0) * SMS_UPLOAD_TIME +
+                        (readFilesData?.audioFiles || 0) * AUDIO_UPLOAD_TIME;
+
+                      const minutes = Math.floor(totalSeconds / 60);
+                      const seconds = totalSeconds % 60;
+
+                      if (minutes > 0) {
+                        return `~${minutes} min ${seconds} sec`;
+                      } else {
+                        return `~${seconds} seconds`;
+                      }
+                    })()}
+                  </div>
+                  <div className="text-xs text-slate-500 mt-1">
+                    {readFilesData?.totalFiles
+                      ? `Processing ${readFilesData.totalFiles} files`
+                      : "No files to process"}
+                  </div>
+                </div>
               </div>
-            ))}
+            </div>
+
+            {/* Warning/Info Message */}
+            <div className="text-sm text-slate-500 bg-slate-50 p-3 rounded-lg">
+              <div className="flex gap-2 items-start">
+                <div className="text-amber-500 mt-0.5">⚠️</div>
+                <div>
+                  <div className="text-slate-700 font-medium mb-1">
+                    Upload Information
+                  </div>
+                  <div>Upload time may vary based on:</div>
+                  <ul className="list-disc ml-4 mt-1 text-xs space-y-1">
+                    <li>Your internet connection speed</li>
+                    <li>Server response time</li>
+                    <li>File sizes and complexity</li>
+                  </ul>
+                  {readFilesData?.totalErrors &&
+                    readFilesData.totalErrors > 0 && (
+                      <div className="mt-2 text-red-600 font-medium">
+                        ⚠️ {readFilesData.totalErrors} files excluded due to
+                        validation errors
+                      </div>
+                    )}
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
         {/* Fixed Footer */}
-        <div className="flex flex-shrink-0 flex-col gap-3 border-t border-slate-200 bg-white px-4 py-4 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-          <div className="flex gap-1">
-            <p className="text-sm font-bold text-slate-900 sm:text-base">
-              {fileRecords.length} files
-            </p>
-            <p className="text-sm font-medium text-slate-500 sm:text-base">
-              ready to upload
-            </p>
+        <DialogFooter className="flex-shrink-0 border-t pt-4 mt-4">
+          <div className="w-full space-y-4">
+            {/* Status Summary */}
+            <div className="flex items-center justify-between text-sm bg-slate-50 p-3 rounded-lg">
+              <div className="flex gap-6">
+                <div className="flex items-center gap-2">
+                  <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                  <span className="text-slate-700 font-medium">
+                    {readFilesData?.totalFiles || 0} valid files ready
+                  </span>
+                </div>
+                {readFilesData?.totalErrors &&
+                  readFilesData.totalErrors > 0 && (
+                    <div className="flex items-center gap-2">
+                      <div className="w-3 h-3 bg-red-500 rounded-full"></div>
+                      <span className="text-slate-700 font-medium">
+                        {readFilesData.totalErrors} files with errors (will be
+                        skipped)
+                      </span>
+                    </div>
+                  )}
+              </div>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex justify-end gap-3">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setReadFilesData(null);
+                  toast({
+                    title: "Upload Cancelled",
+                    description:
+                      "File selection cancelled. You can try again with a different directory.",
+                    variant: "destructive",
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+
+              {readFilesData?.totalFiles && readFilesData.totalFiles > 0 ? (
+                <Button
+                  type="button"
+                  onClick={() => {
+                    setReadFilesData(null);
+                    setProcessingLoader(true);
+                    start(`contextId=${contextId.toString()}`);
+                    startUpload(fileRecords);
+                    const validFilesCount = readFilesData?.totalFiles || 0;
+                    const errorFilesCount = readFilesData?.totalErrors || 0;
+                    toast({
+                      title: "Upload Started",
+                      description:
+                        errorFilesCount > 0
+                          ? `Uploading ${validFilesCount} valid files. ${errorFilesCount} files with validation errors will be skipped.`
+                          : `Uploading ${validFilesCount} files. All files passed validation.`,
+                    });
+                  }}
+                >
+                  Upload Valid Files ({readFilesData.totalFiles})
+                </Button>
+              ) : (
+                <Button type="button" variant="destructive" disabled>
+                  No Valid Files to Upload
+                </Button>
+              )}
+            </div>
+
+            {/* Help Text */}
+            {readFilesData?.totalErrors && readFilesData.totalErrors > 0 && (
+              <div className="text-xs text-center text-slate-600 bg-blue-50 p-3 rounded border border-blue-200">
+                💡 <strong>What happens next:</strong> Only valid files will be
+                uploaded. Files with errors will remain in your directory and
+                won't be processed. You can fix the metadata issues in those
+                files and upload them later.
+              </div>
+            )}
+          </div>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+
+  // Simple Upload Error Display
+  const UploadErrorDisplay = () => {
+    if (!uploadError) return null;
+
+    return (
+      <div className="mx-6 mb-4 p-4 bg-red-50 border border-red-200 rounded-lg">
+        <div className="flex items-start gap-3">
+          <div className="text-red-500 text-xl">⚠️</div>
+          <div className="flex-1">
+            <div className="flex items-center gap-2 mb-2">
+              <h3 className="font-semibold text-red-800">Upload Error</h3>
+              <span className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium">
+                {uploadError.apiType} API
+              </span>
+              <span className="px-2 py-1 bg-gray-100 text-gray-600 rounded text-xs">
+                {uploadError.failedCount} file
+                {uploadError.failedCount > 1 ? "s" : ""} failed
+              </span>
+            </div>
+            <p className="text-sm text-red-700 mb-3">{uploadError.message}</p>
+            <div className="flex gap-2 pt-2">
+              <button
+                onClick={retryFailedUploads}
+                disabled={processingLoader}
+                className="px-3 py-1 bg-red-600 hover:bg-red-700 disabled:bg-red-400 text-white text-xs rounded transition-colors flex items-center gap-1"
+              >
+                {processingLoader ? (
+                  <>
+                    <div className="w-3 h-3 border border-white border-t-transparent rounded-full animate-spin" />
+                    Retrying...
+                  </>
+                ) : (
+                  "Retry Failed Files"
+                )}
+              </button>
+              <button
+                onClick={() => setUploadError(null)}
+                className="px-3 py-1 bg-gray-500 hover:bg-gray-600 text-white text-xs rounded transition-colors"
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex max-h-screen w-full flex-col overflow-hidden">
+      <ReadingFilesDialog isOpen={isReadingFiles} dirPath={dirPath} />
+      <FilesSummaryDialog
+        readFilesData={readFilesData}
+        onUpload={() => {
+          setProcessingLoader(true);
+          start(`contextId=${contextId.toString()}`);
+          startUpload(fileRecords);
+        }}
+        processingLoader={processingLoader}
+      />
+      <UploadErrorDisplay
+        uploadError={uploadError}
+        onRetry={retryFailedUploads}
+        onDismiss={() => setUploadError(null)}
+        processingLoader={processingLoader}
+      />
+      {/* Fixed Header */}
+      <div className="flex-shrink-0 border-b border-slate-200 bg-white px-6 py-4">
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2.5 rounded-full border-2 border-dashed border-slate-200 bg-slate-100 p-3">
+              <Upload className="h-5 w-5 text-slate-600" />
+            </div>
+            <div>
+              <h1 className="text-lg font-semibold text-slate-900">
+                Upload Files
+              </h1>
+              <p className="text-sm text-slate-500">
+                Managing {(data || fileRecords).length.toLocaleString()} files
+              </p>
+            </div>
           </div>
 
-          <div className="flex gap-2">
+          {/* Status Overview */}
+          <div className="flex gap-4 text-sm">
+            <div className="text-center">
+              <div className="font-semibold text-green-600">
+                {getStatusCounts.completed.toLocaleString()}
+              </div>
+              <div className="text-slate-500">Completed</div>
+            </div>
+            <div className="text-center">
+              <div className="font-semibold text-blue-600">
+                {getStatusCounts.processing.toLocaleString()}
+              </div>
+              <div className="text-slate-500">Processing</div>
+            </div>
+            <div className="text-center">
+              <div className="font-semibold text-yellow-600">
+                {getStatusCounts.pending.toLocaleString()}
+              </div>
+              <div className="text-slate-500">Pending</div>
+            </div>
+            {getStatusCounts.error > 0 && (
+              <div className="text-center">
+                <div className="font-semibold text-red-600">
+                  {getStatusCounts.error.toLocaleString()}
+                </div>
+                <div className="text-slate-500">Error</div>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* File Input Section */}
+      <div className="flex-shrink-0 bg-white px-6 py-4 border-b border-slate-200">
+        <div
+          className={`flex items-center justify-center rounded-lg border-2 border-dashed px-6 py-8 transition-colors ${
+            dragOver
+              ? "border-blue-400 bg-blue-50"
+              : "border-slate-200 hover:border-slate-300"
+          }`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+        >
+          <div className="text-center">
+            <div className="rounded-full bg-slate-100 p-3 mx-auto w-fit mb-3">
+              <Upload className="h-6 w-6 text-slate-600" />
+            </div>
+            {dirPath ? (
+              <div>
+                <p className="text-sm text-slate-500 mb-2">
+                  Selected directory:{" "}
+                  <span className="font-medium">{dirPath}</span>
+                </p>
+                <button
+                  onClick={() => {
+                    handleFileInput();
+                    setDirPath("");
+                  }}
+                  className="text-blue-600 hover:underline text-sm"
+                >
+                  Change Directory
+                </button>
+              </div>
+            ) : (
+              <div>
+                <p className="text-sm font-medium text-slate-900 mb-1">
+                  Drag and drop files here, or{" "}
+                  <button
+                    onClick={handleFileInput}
+                    className="text-blue-600 hover:underline"
+                  >
+                    browse
+                  </button>
+                </p>
+                <p className="text-xs text-slate-500">
+                  Supports audio files, SMS threads, documents
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {/* Filters and Search */}
+      {data && data.length > 0 && (
+        <div className="flex-shrink-0 bg-white px-6 py-3 border-b border-slate-200">
+          <div className="flex items-center gap-4">
+            {/* Search */}
+            <div className="relative flex-1 max-w-md">
+              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <input
+                type="text"
+                placeholder="Search files..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-md focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+              />
+              {searchTerm && (
+                <button
+                  onClick={() => setSearchTerm("")}
+                  className="absolute right-3 top-1/2 transform -translate-y-1/2"
+                >
+                  <X className="h-4 w-4 text-slate-400" />
+                </button>
+              )}
+            </div>
+
+            {/* Filter Toggle */}
+            <button
+              onClick={() => setShowFilters(!showFilters)}
+              className="flex items-center gap-2 px-3 py-2 border border-slate-200 rounded-md hover:bg-slate-50"
+            >
+              <Filter className="h-4 w-4" />
+              Filters
+              <ChevronDown
+                className={`h-4 w-4 transition-transform ${showFilters ? "rotate-180" : ""}`}
+              />
+            </button>
+
+            <div className="text-sm text-slate-500">
+              Showing {filteredAndSortedFiles.length.toLocaleString()} of{" "}
+              {(data || fileRecords).length.toLocaleString()} files
+            </div>
+          </div>
+
+          {/* Expandable Filters */}
+          {showFilters && (
+            <div className="mt-3 pt-3 border-t border-slate-200">
+              <div className="flex gap-6">
+                {/* Status Filter */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 mb-1 block">
+                    Status
+                  </label>
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className="text-sm border border-slate-200 rounded px-2 py-1"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="completed">Completed</option>
+                    <option value="processing">Processing</option>
+                    <option value="pending">Pending</option>
+                    <option value="error">Error</option>
+                  </select>
+                </div>
+
+                {/* Sort Options */}
+                <div>
+                  <label className="text-xs font-medium text-slate-700 mb-1 block">
+                    Sort By
+                  </label>
+                  <select
+                    value={sortBy}
+                    onChange={(e) => setSortBy(e.target.value)}
+                    className="text-sm border border-slate-200 rounded px-2 py-1 mr-2"
+                  >
+                    <option value="name">Name</option>
+                    <option value="size">Size</option>
+                    <option value="date">Date</option>
+                  </select>
+                  <select
+                    value={sortOrder}
+                    onChange={(e) => setSortOrder(e.target.value)}
+                    className="text-sm border border-slate-200 rounded px-2 py-1"
+                  >
+                    <option value="asc">Ascending</option>
+                    <option value="desc">Descending</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* File List */}
+      <div className="flex-1 overflow-hidden">
+        {filteredAndSortedFiles.length > 0 ? (
+          <VirtualizedFileList
+            files={filteredAndSortedFiles}
+            itemHeight={56}
+            containerHeight={400}
+            renderItem={renderFileItem}
+          />
+        ) : (
+          <div className="flex items-center justify-center h-full text-slate-500">
+            <div className="text-center">
+              <Upload className="h-12 w-12 text-slate-300 mx-auto mb-3" />
+              <p className="text-lg font-medium">No files found</p>
+              <p className="text-sm">Try adjusting your search or filters</p>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {/* Fixed Footer */}
+      <div className="flex-shrink-0 bg-white border-t border-slate-200 px-6 py-4">
+        <div className="flex items-center justify-between">
+          <div className="text-sm text-slate-600">
+            <span className="font-semibold">
+              {filteredAndSortedFiles.length.toLocaleString()}
+            </span>{" "}
+            files ready for processing
+          </div>
+
+          <div className="flex gap-3">
             <Button
               variant="outline"
-              onClick={resetForm}
-              disabled={isSubmitting}
+              disabled={isSubmitting || processingLoader}
             >
               Reset Data
             </Button>
             <Button
               type="submit"
-              disabled={
-                !formik.isValid || fileRecords.length === 0 || isSubmitting
-              }
+              disabled={!dirPath || processingLoader}
               onClick={(e) => {
                 e.preventDefault();
-                formik.handleSubmit();
+                startFileProcessing(dirPath);
               }}
             >
               {isSubmitting ? "Uploading..." : "Submit All Files"}
@@ -954,7 +1053,7 @@ const UploadRecordForm: React.FC = () => {
           </div>
         </div>
       </div>
-    </>
+    </div>
   );
 };
 

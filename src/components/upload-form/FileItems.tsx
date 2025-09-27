@@ -1,13 +1,4 @@
-// File Item Component
-
-import { CheckLine, ChevronDown, FileText, Phone, Trash2 } from "lucide-react";
-import { Button } from "../ui/button";
-import MetaDataForm from "./metadata-form";
-import { Tooltip, TooltipProvider, TooltipTrigger } from "../ui/tooltip";
-import { Progress } from "../ui/progress";
-import { useLayoutEffect, useState } from "react";
-import { useUploadStatus } from "../../context/upload-status-context";
-import { TooltipContent } from "@radix-ui/react-tooltip";
+import { AlertCircle, Check, Clock } from "lucide-react";
 import { FileRecord } from "../../types/common";
 
 export const FileItem: React.FC<{
@@ -20,196 +11,99 @@ export const FileItem: React.FC<{
   ) => void;
   errors?: Record<string, string>;
   showExpandButton?: boolean;
+  index?: number;
 }> = ({
   fileRecord,
   onDelete,
   onUpdateMetadata,
   errors = {},
   showExpandButton = true,
+  index = 0,
 }) => {
-  const { uploadStatus } = useUploadStatus();
-  // Auto-expand if there are errors for this file
-  const hasErrors = errors && Object.keys(errors).length > 0;
-  const [isExpanded, setIsExpanded] = useState(false);
-  const [metadata, setMetadata] = useState(fileRecord.metadata || {});
+   const hasErrors = errors && Object.keys(errors).length > 0;
 
-  const handleMetadataChange = (
-    field: string,
-    value: string | Date | undefined
-  ) => {
-    const updatedMetadata = { ...metadata, [field]: value };
-    setMetadata(updatedMetadata);
-    onUpdateMetadata(
-      fileRecord.id,
-      updatedMetadata,
-      fileRecord.isReferenceFound
-    );
-  };
+  const steps = [
+    { key: "isRead", label: "Read" },
+    { key: "isUploaded", label: "Uploaded" },
+    { key: "isIngested", label: "Ingested" },
+  ];
 
-  const formatFileSize = (bytes: number) => {
-    if (bytes === 0) return "0 Bytes";
-    const k = 1024;
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return (
-      Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
-    );
-  };
-
-  const getStatusDisplayText = (status?: string) => {
-    if (!status) return "Waiting...";
-
-    // Convert API status to display text
-    return status
-      .split("_")
-      .map((word) => word.charAt(0) + word.slice(1).toLowerCase())
-      .join(" ");
-  };
-
-  const fileStatus = fileRecord.requestId
-    ? uploadStatus[fileRecord.requestId]
-    : null;
-  const currentStatus = fileStatus?.status;
-  const currentProgress = fileStatus?.progress || 0;
-  const statusDisplayText = getStatusDisplayText(fileStatus?.status);
-
-  // Auto-expand and scroll into view if errors appear
-  useLayoutEffect(() => {
-    if (isExpanded) {
-      const el = document.getElementById("active-file-form" + fileRecord.id);
-      if (el) {
-        el.scrollIntoView({ behavior: "smooth", block: "center" });
-      }
+  const getStepColor = (stepKey:string) => {
+    if (fileRecord[stepKey as keyof FileRecord]) {
+      if (stepKey === "isIngested") return "bg-green-500";
+      if (stepKey === "isUploaded") return "bg-blue-500";
+      return "bg-slate-500";
     }
-  }, [isExpanded, hasErrors]);
+    return "bg-slate-300";
+  };
+
+  const getStatusIcon = () => {
+    if (fileRecord.isIngested)
+      return <Check className="h-4 w-4 text-green-500" />;
+    if (hasErrors) return <AlertCircle className="h-4 w-4 text-red-500" />;
+    return <Clock className="h-4 w-4 text-yellow-500" />;
+  };
+
+  const formatFileSize = (sizeStr: string) => {
+    if (!sizeStr) return "0 B";
+    const bytes = parseInt(sizeStr, 10);
+    if (isNaN(bytes)) return sizeStr; // Return original if not a number
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  };
+
+  const formatDate = (dateStr: string) => {
+    if (!dateStr) return "";
+    try {
+      return new Date(dateStr).toLocaleDateString();
+    } catch {
+      return dateStr;
+    }
+  };
 
   return (
     <div
-      className={`flex w-full flex-col gap-3 overflow-hidden rounded-lg border  bg-white p-3 ${
-        fileRecord.isReferenceFound
-          ? "border-slate-200"
-          : "border-red-500 opacity-90"
-      } ${showExpandButton ? "" : "border-green-400 shadow-md "}`}
+      className="flex items-center justify-between gap-3 bg-white border-b border-slate-100 px-4 py-3 hover:bg-slate-50 transition-colors"
+      style={{ height: 56 }}
     >
-      <div className="flex items-center justify-between">
-        <div className="flex min-w-0 flex-1 items-center gap-2">
-          <div className="flex flex-shrink-0 items-center gap-2.5 rounded-md bg-neutral-100 p-[5px]">
-            {fileRecord.type === "audio" ? (
-              <Phone className="h-3.5 w-3.5 text-slate-600" />
-            ) : (
-              <FileText className="h-3.5 w-3.5 text-slate-600" />
-            )}
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-sm font-semibold text-slate-900">
-              {fileRecord.file.name}
-            </p>
-            <p className="text-xs text-slate-500">
-              {formatFileSize(fileRecord.file.size)}
-            </p>
-          </div>
+      {/* File info */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-400 font-mono w-8 flex-shrink-0">
+            #{fileRecord.id}
+          </span>
+          <p className="truncate text-sm font-medium text-slate-900">
+            {fileRecord.fileName}
+          </p>
+          <span className="text-xs text-slate-400 bg-slate-100 px-1.5 py-0.5 rounded">
+            {fileRecord.fileType}
+          </span>
+        </div>
+        <p className="text-xs text-slate-500 mt-0.5">
+          {formatFileSize(fileRecord.fileSize)} •{" "}
+          {formatDate(fileRecord.uploadedAt)}
+        </p>
+      </div>
+
+      {/* Status indicators */}
+      <div className="flex items-center gap-3 flex-shrink-0">
+        {/* Progress dots */}
+        <div className="flex items-center gap-1">
+          {steps.map((step) => (
+            <div
+              key={step.key}
+              title={step.label}
+              className={`h-2.5 w-2.5 rounded-full ${getStepColor(step.key)}`}
+            />
+          ))}
         </div>
 
-        <div className="flex flex-shrink-0 items-center gap-2 sm:gap-4">
-          {!fileRecord.isReferenceFound && (
-            <p className="hidden text-xs font-medium text-red-500 md:block lg:w-24">
-              Reference not found in CRI Files
-            </p>
-          )}
-
-          <div className="hidden rounded-md border border-slate-200 px-3 py-1 sm:block">
-            <p className="text-sm font-medium text-neutral-500 capitalize">
-              {fileRecord.type}
-            </p>
-          </div>
-
-          {fileRecord.type === "audio" && fileRecord.duration && (
-            <p className="hidden w-20 text-sm font-medium text-neutral-500 md:block lg:w-24">
-              {fileRecord.duration || ""}
-            </p>
-          )}
-
-          {fileRecord.requestId && currentProgress !== undefined && (
-            <div className="flex items-center gap-2">
-              <TooltipProvider>
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <div className="flex items-center gap-2">
-                      <Progress
-                        value={
-                          !currentStatus || currentStatus === "error"
-                            ? 100
-                            : currentProgress
-                        }
-                        className={`h-2 w-24 ${
-                          !currentStatus || currentStatus.includes("FAILED")
-                            ? "[&>div]:bg-red-500"
-                            : currentStatus === "KEYWORD_DETECTION_COMPLETE" ||
-                                currentStatus === "COMPLETED"
-                              ? "[&>div]:bg-green-500"
-                              : "[&>div]:bg-blue-500"
-                        }`}
-                      />
-                      <span
-                        className={`text-xs font-medium ${
-                          !currentStatus || currentStatus === "error"
-                            ? "text-red-500"
-                            : currentStatus === "completed"
-                              ? "text-green-500"
-                              : "text-blue-500"
-                        }`}
-                      >
-                        {statusDisplayText}
-                      </span>
-                    </div>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    <p>{statusDisplayText}</p>
-                  </TooltipContent>
-                </Tooltip>
-              </TooltipProvider>
-            </div>
-          )}
-          {showExpandButton && (
-            <>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsExpanded(!isExpanded)}
-                className="h-auto p-1"
-              >
-                <ChevronDown
-                  className={`h-4 w-4 transition-transform ${
-                    isExpanded ? "rotate-180" : ""
-                  }`}
-                />
-              </Button>
-
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => onDelete(fileRecord.id)}
-                className="h-auto p-1 text-slate-600 hover:text-red-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </Button>
-            </>
-          )}
-          {!showExpandButton && (
-            <CheckLine className="h-4 w-4 text-green-400" />
-          )}
+        {/* Status icon */}
+        <div className="w-4 h-4 flex items-center justify-center">
+          {getStatusIcon()}
         </div>
       </div>
-      <MetaDataForm
-        closeDialog={() => setIsExpanded(false)}
-        dialogOpen={isExpanded}
-        fileType={fileRecord.file.type}
-        handleMetadataChange={handleMetadataChange}
-        metadata={fileRecord.metadata}
-        setDialogOpen={setIsExpanded}
-        showClose={false}
-        errors={errors}
-      />
     </div>
   );
 };

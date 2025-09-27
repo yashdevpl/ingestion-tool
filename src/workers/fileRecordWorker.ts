@@ -1,60 +1,12 @@
-import pLimit from "p-limit";
-import { FileRecordMetadata, ParseResult } from "../types/common";
-import {
-  getFileType,
-  getValidISOStringFromCri,
-  parseCallLogFile,
-} from "../utils/conversion";
+// workers/fileRecordWorker.js
+import workerpool from "workerpool";
+import { getFileType, getValidISOStringFromCri } from "../utils/conversion";
 
-const fs = require("fs");
-const path = require("path");
-const workerpool = require("workerpool");
-
-const FILE_CONCURRENCY = 50; // adjust if needed
-const limit = pLimit(FILE_CONCURRENCY);
-
-// Function to read files from a directory
-async function readFiles(dirPath: string) {
-  const filenames = await fs.promises.readdir(dirPath);
-  const files = await Promise.all(
-    filenames.map((file: any) =>
-      limit(async () => {
-        const fullPath = path.join(dirPath, file);
-        const stat = await fs.promises.stat(fullPath);
-        return {
-          name: file,
-          path: fullPath,
-          isDirectory: stat.isDirectory(),
-          size: stat.size,
-          type: stat.type,
-        };
-      })
-    )
-  );
-
-  const txtFilesList = Array.from(files).filter(
-    (file) => getFileType(file) === "text"
-  );
-  const audioFilesList = Array.from(files).filter(
-    (file) => getFileType(file) === "audio"
-  );
-  const SMSCriFileList: File[] = [];
-
-  // Parse CRI text files for metadata
-  const CRITextToObjList: ParseResult[] = await Promise.all(
-    txtFilesList.map((file) =>
-      limit(async () => {
-        const criText = await fs.promises.readFile(file.path, "utf8");
-        const metaData = parseCallLogFile(criText, file.name);
-        if (metaData.data?.callType === "SMS") SMSCriFileList.push(file);
-        return { ...metaData };
-      })
-    )
-  );
-
-  const validFiles = Array.from([...audioFilesList, ...SMSCriFileList]);
-
-  const newFileRecords: FileRecordMetadata[] = validFiles.map((file) => {
+export const createFileMetadataList = async (
+  validFiles: any[],
+  CRITextToObjList: any[]
+) => {
+  const newFileRecords = validFiles.map((file) => {
     const metaData =
       CRITextToObjList.find((obj) => obj.data.fileName === file.name)?.data ||
       CRITextToObjList.find((obj) => obj.data.criFileName === file.name)
@@ -68,8 +20,8 @@ async function readFiles(dirPath: string) {
       ),
       id: Math.random().toString(36).substr(2, 9),
       file,
-      type: getFileType(file),
-      duration: getFileType(file) === "audio" ? "" : undefined,
+      type: getFileType(file?.name),
+      duration: getFileType(file?.name) === "audio" ? "" : undefined,
       metadata: {
         targetNumber: metaData.targetNumber || "",
         trackingCode: metaData.targetName || "",
@@ -109,10 +61,10 @@ async function readFiles(dirPath: string) {
       },
     };
   });
-  return { validFiles, newFileRecords };
-}
 
-// expose functions
+  return newFileRecords;
+};
+
 workerpool.worker({
-  readFiles,
+  createFileMetadataList,
 });
