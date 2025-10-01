@@ -47,8 +47,6 @@ export interface TabState {
   progress: boolean;
 }
 
-("use client");
-
 import {
   AlertCircle,
   CheckCircle,

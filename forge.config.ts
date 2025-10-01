@@ -71,19 +71,6 @@ if (process.env.NODE_ENV === "production") {
 }
 
 const config: ForgeConfig = {
-  publishers: [
-    {
-      name: "@electron-forge/publisher-github",
-      config: {
-        repository: {
-          owner: "yashdevpl",
-          name: "vox-app",
-        },
-        prerelease: false,
-        draft: true,
-      },
-    },
-  ],
   packagerConfig: {
     protocols: [
       {

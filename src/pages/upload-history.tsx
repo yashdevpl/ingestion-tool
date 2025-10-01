@@ -1,5 +1,3 @@
-"use client";
-
 import { useEffect, useState } from "react";
 import { Context } from "../types/common";
 import { ColumnDefinition, DataTable } from "../components/data-table";
