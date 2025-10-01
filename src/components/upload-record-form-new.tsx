@@ -21,6 +21,7 @@ import { ReadingFilesDialog } from "./upload-form/ReadingFilesDialog";
 import { UploadErrorDisplay } from "./upload-form/UploadErrorDisplay";
 import { UploadFooter } from "./upload-form/UploadFooter";
 import { VirtualizedFileList } from "./upload-form/VirtualizedFileList";
+import { ENV } from "../utils/constants";
 
 declare global {
   interface Window {
@@ -105,7 +106,7 @@ const UploadRecordForm: React.FC = () => {
     uploadedCount?: number;
     ingestedCount?: number;
   }>({
-    url: `http://localhost:3001/api/file-uploads`,
+    url: `${ENV.WEB_APP_PROXY_URL}/api/file-uploads`,
     interval: 4000,
   });
 

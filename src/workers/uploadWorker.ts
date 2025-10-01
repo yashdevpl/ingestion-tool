@@ -1,4 +1,7 @@
 import workerpool from "workerpool";
+import { ENV } from "../utils/constants";
+import dotenv from "dotenv";
+dotenv.config();
 
 interface FileMetadata {
   targetNumber: string;
@@ -160,7 +163,7 @@ export async function uploadFiles(files: UploadFile[]) {
     const batch = audioFiles.slice(i, i + BATCH_SIZE);
     const result = await uploadBatch(
       batch,
-      "http://localhost:3001/api/ingestion",
+      `${process.env.WEB_APP_PROXY_URL}/api/ingestion`,
       "call"
     );
 
@@ -196,7 +199,7 @@ export async function uploadFiles(files: UploadFile[]) {
     const batch = smsFiles.slice(i, i + BATCH_SIZE);
     const result = await uploadBatch(
       batch,
-      "http://localhost:3001/api/ingestion/sms",
+      `${process.env.WEB_APP_PROXY_URL}/api/ingestion/sms`,
       "sms"
     );
 

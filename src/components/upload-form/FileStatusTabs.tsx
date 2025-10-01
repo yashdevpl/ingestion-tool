@@ -62,6 +62,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { ScrollArea } from "../ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { IngestionProgressItem } from "./IngestionProgressItem";
+import { ENV } from "../../utils/constants";
 
 export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
   dirPath,
@@ -230,7 +231,7 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
   const { statusMap, isPolling, allComplete, activePollingCount } =
     useIngestionPolling({
       files: filesForPolling,
-      baseUrl: "http://localhost:3001",
+      baseUrl: ENV.WEB_APP_PROXY_URL || "http://localhost:3001",
       isEnabled: true,
       pollingInterval: 3000,
       onFileStatusChange: handleFileStatusChange,

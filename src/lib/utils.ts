@@ -2,12 +2,13 @@ import { clsx, type ClassValue } from "clsx";
 import { twMerge } from "tailwind-merge";
 import { apiResponse } from "../types/common";
 import { ApiResponse } from "../components/upload-form/FileStatusTabs";
+import { ENV } from "../utils/constants";
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
 }
 
-const API_BASE_URL = "http://localhost:3001";
+const API_BASE_URL = ENV.WEB_APP_PROXY_URL || "http://localhost:3001";
 
 interface FetchFilesParams {
   contextId: number;

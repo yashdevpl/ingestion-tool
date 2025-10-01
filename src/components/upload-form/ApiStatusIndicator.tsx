@@ -1,13 +1,14 @@
-import React, { useState, useEffect } from 'react';
-import { Badge } from '../ui/badge';
-import { Wifi, WifiOff } from 'lucide-react';
+import React, { useState, useEffect } from "react";
+import { Badge } from "../ui/badge";
+import { Wifi, WifiOff } from "lucide-react";
+import { ENV } from "../../utils/constants";
 
 interface ApiStatusIndicatorProps {
   baseUrl?: string;
 }
 
-export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({ 
-  baseUrl = 'http://localhost:3001' 
+export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({
+  baseUrl = ENV.WEB_APP_PROXY_URL,
 }) => {
   const [isOnline, setIsOnline] = useState(true);
   const [isChecking, setIsChecking] = useState(false);
@@ -18,19 +19,19 @@ export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({
       try {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 5000);
-        
+
         // Try to fetch from a known working endpoint instead of health
         const response = await fetch(`${baseUrl}/api/file-uploads?take=1`, {
-          method: 'GET',
-          signal: controller.signal
+          method: "GET",
+          signal: controller.signal,
         });
-        
+
         clearTimeout(timeoutId);
         setIsOnline(response.ok || response.status < 500); // Consider 4xx as "online but error"
       } catch (error: any) {
-        console.log('API status check failed:', error.message);
+        console.log("API status check failed:", error.message);
         // For CORS errors, consider the API as potentially online
-        if (error.name === 'TypeError' && error.message.includes('CORS')) {
+        if (error.name === "TypeError" && error.message.includes("CORS")) {
           setIsOnline(true); // API is likely running but CORS is blocking
         } else {
           setIsOnline(false);
@@ -50,8 +51,8 @@ export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({
   }, [baseUrl]);
 
   return (
-    <Badge 
-      variant={isOnline ? "default" : "destructive"} 
+    <Badge
+      variant={isOnline ? "default" : "destructive"}
       className="text-xs flex items-center space-x-1"
     >
       {isChecking ? (
@@ -61,7 +62,7 @@ export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({
       ) : (
         <WifiOff className="h-3 w-3" />
       )}
-      <span>{isOnline ? 'Online' : 'Offline'}</span>
+      <span>{isOnline ? "Online" : "Offline"}</span>
     </Badge>
   );
 };

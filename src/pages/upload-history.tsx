@@ -7,6 +7,7 @@ import { useAuthContextProvider } from "../context/auth-context";
 import { AlertCircle, Database, RefreshCw } from "lucide-react";
 import axios from "axios";
 import { useNavigate } from "react-router-dom";
+import { ENV } from "../utils/constants";
 
 type Pagination = {
   page: number;
@@ -39,7 +40,7 @@ const ContextsTable = () => {
     try {
       const skip = page * limit;
       const response = await axios.get(
-        `http://localhost:3001/api/upload-context/${userInfo?.sub || ""}?skip=${skip}&take=${limit}`
+        `${ENV.WEB_APP_PROXY_URL}/api/upload-context/${userInfo?.sub || ""}?skip=${skip}&take=${limit}`
       );
 
       if (response.data) {

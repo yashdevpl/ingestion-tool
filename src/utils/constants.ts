@@ -37,4 +37,5 @@ export const ENV = {
   KC_CLIENT: import.meta.env.VITE_KC_CLIENT,
   KC_REALM: import.meta.env.VITE_KC_REALM,
   KC_REDIRECT_URL: import.meta.env.VITE_KC_REDIRECT_URL,
+  WEB_APP_PROXY_URL: import.meta.env.VITE_WEB_APP_PROXY_URL,
 };

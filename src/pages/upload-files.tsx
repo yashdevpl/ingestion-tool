@@ -16,6 +16,7 @@ import {
   getStatusLabel,
 } from "../components/upload-form/CompactFileItem";
 import { Button } from "../components/ui/button";
+import { ENV } from "../utils/constants";
 
 type FileUpload = {
   id: number;
@@ -87,7 +88,7 @@ const FileUploadsTable = () => {
     try {
       const skip = page * limit;
       const response = await axios.get<FileUploadsResponse>(
-        `http://localhost:3001/api/file-uploads?contextId=${contextId}&skip=${skip}&take=${limit}`
+        `${ENV.WEB_APP_PROXY_URL}/api/file-uploads?contextId=${contextId}&skip=${skip}&take=${limit}`
       );
 
       if (response.data) {
