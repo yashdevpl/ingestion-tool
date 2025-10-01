@@ -1,24 +1,13 @@
-import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
-import { ScrollArea } from "../ui/scroll-area";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
-  FileText,
-  Upload,
-  CheckCircle,
-  AlertCircle,
-  Loader2,
-  RefreshCw,
-} from "lucide-react";
-import { CompactFileItem } from "./CompactFileItem";
-import { ApiStatusIndicator } from "./ApiStatusIndicator";
-import { IngestionProgressItem } from "./IngestionProgressItem";
+  COMPLETE_STATUSES,
+  FAILED_STATUSES,
+  useIngestionPolling,
+} from "../../hooks/use-ingestion-polling";
 import { FileRecord } from "../../types/common";
-import { useIngestionPolling } from "../../hooks/use-ingestion-polling";
+import { CompactFileItem, type fileStatus } from "./CompactFileItem";
 
-interface ApiResponse {
+export interface ApiResponse {
   data: FileRecord[];
   totalCount: number;
   uploadedCount: number;
@@ -26,88 +15,144 @@ interface ApiResponse {
   ingestedCount: number;
 }
 
-interface FileStatusItem {
+export interface FileStatusItem {
   id: string;
   fileName: string;
   fileSize: number;
   uploadDate?: string;
   ingestionDate?: string;
-  status: "uploaded" | "ingested" | "failed";
+  status: fileStatus | string;
   fileType: string;
   errorMessage?: string;
 }
 
-interface FileStatusTabsProps {
+export interface FileStatusTabsProps {
   contextId?: number;
+  dirPath: string;
   onBack: () => void;
   onProcessingStart?: () => void;
   onProcessingComplete?: () => void;
 }
 
+export interface PaginationState {
+  skip: number;
+  take: number;
+  currentPage: number;
+}
+
+export interface TabState {
+  uploaded: boolean;
+  ingested: boolean;
+  total: boolean;
+  progress: boolean;
+}
+
+("use client");
+
+import {
+  AlertCircle,
+  CheckCircle,
+  FileText,
+  Loader2,
+  RefreshCw,
+} from "lucide-react";
+import { fetchFilesFromApi, fetchInitialCountsFromApi } from "../../lib/utils";
+import { convertToFileStatusItems } from "../../utils/conversion";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
+import { ScrollArea } from "../ui/scroll-area";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
+import { IngestionProgressItem } from "./IngestionProgressItem";
+
 export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
+  dirPath,
   contextId,
   onBack,
   onProcessingStart,
   onProcessingComplete,
 }) => {
-  const [activeTab, setActiveTab] = useState("uploaded");
-  const [apiData, setApiData] = useState<Record<string, ApiResponse | null>>({
-    uploaded: null,
-    ingested: null,
-    total: null,
-    progress: null,
+  const [activeTab, setActiveTab] = useState("total");
+
+  // Total tab states
+  const [totalData, setTotalData] = useState<ApiResponse | null>(null);
+  const [totalLoading, setTotalLoading] = useState(false);
+  const [totalSilentLoading, setTotalSilentLoading] = useState(false);
+  const [totalError, setTotalError] = useState<string | null>(null);
+  const [totalPagination, setTotalPagination] = useState({
+    skip: 0,
+    take: 2,
+    currentPage: 1,
   });
-  const [loading, setLoading] = useState<Record<string, boolean>>({
-    uploaded: false,
-    ingested: false,
-    total: false,
-    progress: false,
+  const [totalLoadedCount, setTotalLoadedCount] = useState(0);
+  const [totalHasMore, setTotalHasMore] = useState(false);
+
+  // Ingested tab states
+  const [ingestedData, setIngestedData] = useState<ApiResponse | null>(null);
+  const [ingestedLoading, setIngestedLoading] = useState(false);
+  const [ingestedSilentLoading, setIngestedSilentLoading] = useState(false);
+  const [ingestedError, setIngestedError] = useState<string | null>(null);
+  const [ingestedPagination, setIngestedPagination] = useState({
+    skip: 0,
+    take: 2,
+    currentPage: 1,
   });
-  const [error, setError] = useState<Record<string, string | null>>({
-    uploaded: null,
-    ingested: null,
-    total: null,
-    progress: null,
+  const [ingestedLoadedCount, setIngestedLoadedCount] = useState(0);
+  const [ingestedHasMore, setIngestedHasMore] = useState(false);
+
+  // Uploaded tab states
+  const [uploadedData, setUploadedData] = useState<ApiResponse | null>(null);
+  const [uploadedLoading, setUploadedLoading] = useState(false);
+  const [uploadedSilentLoading, setUploadedSilentLoading] = useState(false);
+  const [uploadedError, setUploadedError] = useState<string | null>(null);
+  const [uploadedPagination, setUploadedPagination] = useState({
+    skip: 0,
+    take: 2,
+    currentPage: 1,
   });
+  const [uploadedLoadedCount, setUploadedLoadedCount] = useState(0);
+  const [uploadedHasMore, setUploadedHasMore] = useState(false);
+
+  // Shared states
   const [tabCounts, setTabCounts] = useState({
     uploaded: 0,
     ingested: 0,
     total: 0,
     progress: 0,
   });
-  const [pagination, setPagination] = useState<
-    Record<string, { skip: number; take: number; currentPage: number }>
-  >({
-    uploaded: { skip: 0, take: 2, currentPage: 1 },
-    ingested: { skip: 0, take: 2, currentPage: 1 },
-    total: { skip: 0, take: 2, currentPage: 1 },
-    progress: { skip: 0, take: 2, currentPage: 1 },
-  });
+
   const [showIngestionProgress, setShowIngestionProgress] = useState(false);
   const [processedFiles, setProcessedFiles] = useState<
     (FileRecord & { processingStatus?: any })[]
   >([]);
-  const [trackedFileIds, setTrackedFileIds] = useState<Set<string>>(new Set());
-  const [hasMore, setHasMore] = useState<Record<string, boolean>>({
-    uploaded: false,
-    ingested: false,
-    total: false,
-    progress: false,
-  });
   const [globalCompletedFiles, setGlobalCompletedFiles] = useState<Set<string>>(
     new Set()
   );
   const [initialCountsLoaded, setInitialCountsLoaded] = useState(false);
-  const [processingDisplayCount, setProcessingDisplayCount] = useState(2); // Show 20 files initially
+  const [processingDisplayCount, setProcessingDisplayCount] = useState(2);
   const [processingLoading, setProcessingLoading] = useState(false);
+  const [allFilesPollingStopped, setAllFilesPollingStopped] = useState(false);
 
-  // Prepare files for ingestion polling - include upload and ingestion status - memoized for performance
+  // Stop polling when all files are ingested
+  useEffect(() => {
+    if (activeTab === "total" && totalData && totalData.data.length > 0) {
+      const allIngested = totalData.data.every(
+        (file) =>
+          COMPLETE_STATUSES.includes(file.requestStatus?.toUpperCase()) ||
+          FAILED_STATUSES.includes(file.requestStatus?.toUpperCase())
+      );
+      if (allIngested) {
+        setAllFilesPollingStopped(true);
+      }
+    }
+  }, [activeTab, totalData]);
+
+  // Prepare files for ingestion polling
   const allFilesWithStatus = useMemo(() => {
-    const allUploadedFiles = apiData.uploaded?.data || [];
-    const allIngestedFiles = apiData.ingested?.data || [];
-    const allTotalFiles = apiData.total?.data || [];
+    const allUploadedFiles = uploadedData?.data || [];
+    const allIngestedFiles = ingestedData?.data || [];
+    const allTotalFiles = totalData?.data || [];
 
-    // Combine all files and mark their status
     return allTotalFiles.map((file) => {
       const isUploaded = allUploadedFiles.some((f) => f.id === file.id);
       const isIngested = allIngestedFiles.some((f) => f.id === file.id);
@@ -117,26 +162,24 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
         isIngested: isIngested || file.isIngested,
       };
     });
-  }, [apiData.uploaded?.data, apiData.ingested?.data, apiData.total?.data]);
+  }, [uploadedData?.data, ingestedData?.data, totalData?.data]);
 
-  // Get ALL files ready for polling (not just visible ones) but exclude globally completed files
+  // Get files ready for polling
   const filesForPolling = useMemo(() => {
     const allReadyFiles = allFilesWithStatus
       .filter(
         (file) =>
           file.isUploaded &&
           file.isIngested &&
-          file.context?.requestId &&
-          !globalCompletedFiles.has(file.id.toString()) // Exclude globally completed files
+          file?.requestId &&
+          !globalCompletedFiles.has(file.id.toString())
       )
       .map((file) => ({
         id: file.id.toString(),
         fileType: file.fileType || file.type || "unknown",
         isUploaded: file.isUploaded,
         isIngested: file.isIngested,
-        context: {
-          requestId: file.context?.requestId,
-        },
+        requestId: file?.requestId,
       }));
 
     console.log(
@@ -145,16 +188,14 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     return allReadyFiles;
   }, [allFilesWithStatus, globalCompletedFiles]);
 
-  // Handle file status changes from polling - track globally completed files
+  // Handle file status changes from polling
   const handleFileStatusChange = useCallback(
     (fileId: string, status: any) => {
-      // If file is completed, add it to global completed set
       if (status.isComplete || status.isFailed) {
         setGlobalCompletedFiles((prev) => new Set([...prev, fileId]));
         console.log(`File ${fileId} completed with status: ${status.status}`);
       }
 
-      // Update the processed files list
       setProcessedFiles((prev) => {
         const existingIndex = prev.findIndex((f) => f.id.toString() === fileId);
 
@@ -167,7 +208,6 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
           return newFiles;
         }
 
-        // If file not in processed files, try to find it in all files and add it
         const fileData = allFilesWithStatus.find(
           (f) => f.id.toString() === fileId
         );
@@ -188,26 +228,24 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     [allFilesWithStatus]
   );
 
-  // Start ingestion polling - always enabled if there are files ready
+  // Start ingestion polling
   const { statusMap, isPolling, allComplete, activePollingCount } =
     useIngestionPolling({
       files: filesForPolling,
       baseUrl: "http://localhost:3001",
-      isEnabled: true, // Always enabled - hook handles individual file logic
-      pollingInterval: 3000, // 3 seconds
+      isEnabled: true,
+      pollingInterval: 3000,
       onFileStatusChange: handleFileStatusChange,
     });
 
-  // Show ingestion progress when we have files ready for processing
+  // Show ingestion progress when files are ready
   useEffect(() => {
     if (filesForPolling.length > 0 && !showIngestionProgress) {
       console.log("Files ready for processing, showing progress tab...");
       setShowIngestionProgress(true);
-      // Auto-switch to progress tab if we have new files
       if (activePollingCount > 0) {
         setActiveTab("progress");
       }
-      // Notify parent that processing started
       onProcessingStart?.();
     }
   }, [
@@ -217,7 +255,7 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     onProcessingStart,
   ]);
 
-  // Effect to notify when all processing is complete
+  // Notify when processing is complete
   useEffect(() => {
     if (allComplete && activePollingCount === 0 && showIngestionProgress) {
       console.log("All ingestion processing complete!");
@@ -230,11 +268,10 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     onProcessingComplete,
   ]);
 
-  // Update processed files when we have new files ready for processing from any tab
+  // Update processed files
   useEffect(() => {
-    // Use allFilesWithStatus instead of just current tab data
     const newFiles = allFilesWithStatus.filter(
-      (file) => file.isUploaded && file.isIngested && file.context?.requestId
+      (file) => file.isUploaded && file.isIngested && file?.requestId
     );
 
     setProcessedFiles((prev) => {
@@ -247,51 +284,30 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
   // Handle load more for processing tab
   const handleLoadMoreProcessing = useCallback(() => {
     setProcessingLoading(true);
-    // Simulate loading delay for better UX
     setTimeout(() => {
       setProcessingDisplayCount((prev) => prev + 2);
       setProcessingLoading(false);
     }, 300);
   }, []);
 
-  // Get visible processed files based on display count
+  // Get visible processed files
   const visibleProcessedFiles = useMemo(() => {
     return processedFiles.slice(0, processingDisplayCount);
   }, [processedFiles, processingDisplayCount]);
 
-  // Check if there are more files to load in processing tab
   const hasMoreProcessingFiles = processedFiles.length > processingDisplayCount;
 
-  // Fetch initial counts for all tabs without loading full data
   const fetchInitialCounts = useCallback(async () => {
     if (!contextId || initialCountsLoaded) return;
 
     try {
-      // Fetch just the first item with take=1 to get counts
-      const params = new URLSearchParams({
-        contextId: contextId.toString(),
-        skip: "0",
-        take: "1",
-      });
+      const apiResponse = await fetchInitialCountsFromApi(contextId);
 
-      const response = await fetch(
-        `http://localhost:3001/api/file-uploads?${params}`
-      );
-
-      if (!response.ok) {
-        throw new Error(
-          `Failed to fetch initial counts: ${response.statusText}`
-        );
-      }
-
-      const apiResponse: ApiResponse = await response.json();
-
-      // Update tab counts from the API response
       setTabCounts({
         uploaded: apiResponse.uploadedCount,
         ingested: apiResponse.ingestedCount,
         total: apiResponse.totalCount,
-        progress: 0, // Progress count is based on polling status
+        progress: 0,
       });
 
       setInitialCountsLoaded(true);
@@ -305,93 +321,63 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     }
   }, [contextId, initialCountsLoaded]);
 
-  // Fetch files based on tab using actual API
-  const fetchFiles = useCallback(
-    async (tab: string, loadMore = false) => {
+  const fetchTotalFiles = useCallback(
+    async (loadMore = false, silentRefresh = false) => {
       if (!contextId) return;
 
-      // Progress tab doesn't need API fetching - it uses local polling data
-      if (tab === "progress") return;
-
-      setLoading((prev) => ({ ...prev, [tab]: true }));
-      setError((prev) => ({ ...prev, [tab]: null }));
+      if (silentRefresh) {
+        setTotalSilentLoading(true);
+      } else {
+        setTotalLoading(true);
+      }
+      setTotalError(null);
 
       try {
-        const currentPagination = pagination[tab];
-        const skip = loadMore
-          ? currentPagination.skip + currentPagination.take
-          : 0;
+        let skip: number;
+        let take: number;
 
-        // Build query parameters based on tab
-        const params = new URLSearchParams({
-          contextId: contextId.toString(),
-          skip: skip.toString(),
-          take: currentPagination.take.toString(),
+        if (loadMore) {
+          skip = totalLoadedCount;
+          take = totalPagination.take;
+        } else if (silentRefresh) {
+          skip = 0;
+          take = totalLoadedCount > 0 ? totalLoadedCount : totalPagination.take;
+        } else {
+          skip = 0;
+          take = totalPagination.take;
+        }
+
+        const apiResponse = await fetchFilesFromApi({
+          contextId,
+          tab: "total",
+          skip,
+          take,
         });
 
-        // Add specific filters based on tab
-        switch (tab) {
-          case "uploaded":
-            params.append("isUploaded", "true");
-            break;
-          case "ingested":
-            params.append("isIngested", "true");
-            break;
-          case "total":
-            // No additional filters for total - get all files for this context
-            break;
-        }
+        const hasMoreData = apiResponse.data.length === totalPagination.take;
+        setTotalHasMore(hasMoreData);
 
-        const response = await fetch(
-          `http://localhost:3001/api/file-uploads?${params}`
-        );
-
-        if (!response.ok) {
-          throw new Error(
-            `Failed to fetch ${tab} files: ${response.statusText}`
-          );
-        }
-
-        const apiResponse: ApiResponse = await response.json();
-
-        // Check if there are more pages available
-        const hasMoreData = apiResponse.data.length === currentPagination.take;
-        setHasMore((prev) => ({ ...prev, [tab]: hasMoreData }));
-
-        // Update the data and counts
-        setApiData((prev) => ({
-          ...prev,
-          [tab]:
-            loadMore && prev[tab]
+        if (loadMore) {
+          setTotalData((prev) =>
+            prev
               ? {
                   ...apiResponse,
-                  data: [...prev[tab]!.data, ...apiResponse.data],
+                  data: [...prev.data, ...apiResponse.data],
                 }
-              : apiResponse,
-        }));
-
-        // Update pagination
-        if (loadMore) {
-          setPagination((prev) => ({
+              : apiResponse
+          );
+          setTotalLoadedCount((prev) => prev + apiResponse.data.length);
+          setTotalPagination((prev) => ({
             ...prev,
-            [tab]: {
-              ...prev[tab],
-              skip,
-              currentPage: prev[tab].currentPage + 1,
-            },
+            currentPage: prev.currentPage + 1,
           }));
         } else {
-          setPagination((prev) => ({
-            ...prev,
-            [tab]: {
-              ...prev[tab],
-              skip: 0,
-              currentPage: 1,
-            },
-          }));
+          setTotalData(apiResponse);
+          if (!silentRefresh) {
+            setTotalLoadedCount(apiResponse.data.length);
+          }
         }
 
-        // Update tab counts from the API response (these should be consistent across calls)
         setTabCounts((prev) => ({
           ...prev,
           uploaded: apiResponse.uploadedCount,
@@ -399,65 +385,287 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
           total: apiResponse.totalCount,
         }));
       } catch (error) {
-        console.error(`Error fetching ${tab} files:`, error);
-        setError((prev) => ({
-          ...prev,
-          [tab]:
-            error instanceof Error ? error.message : "Failed to fetch files",
-        }));
-        setHasMore((prev) => ({ ...prev, [tab]: false }));
+        console.error("Error fetching total files:", error);
+        setTotalError(
+          error instanceof Error ? error.message : "Failed to fetch files"
+        );
+        setTotalHasMore(false);
       } finally {
-        setLoading((prev) => ({ ...prev, [tab]: false }));
+        if (silentRefresh) {
+          setTotalSilentLoading(false);
+        } else {
+          setTotalLoading(false);
+        }
       }
     },
-    [contextId, pagination]
+    [contextId, totalPagination, totalLoadedCount]
   );
 
-  // Convert FileRecord to FileStatusItem for display
-  const convertToFileStatusItems = (
-    files: FileRecord[],
-    tabType: string
-  ): FileStatusItem[] => {
-    return files.map((file) => ({
-      id: file.id.toString(),
-      fileName: file.fileName,
-      fileSize: parseInt(file.fileSize),
-      uploadDate: file.uploadedAt,
-      ingestionDate: file.isIngested ? file.uploadedAt : undefined, // You may need to add ingestionDate field
-      status: file.isIngested
-        ? "ingested"
-        : file.isUploaded
-          ? "uploaded"
-          : "failed",
-      fileType: file.fileType,
-      errorMessage:
-        !file.isUploaded && !file.isIngested ? "Upload failed" : undefined,
-    }));
-  };
+  const fetchIngestedFiles = useCallback(
+    async (loadMore = false, silentRefresh = false) => {
+      if (!contextId) return;
 
-  // Fetch initial counts on component mount
+      if (silentRefresh) {
+        setIngestedSilentLoading(true);
+      } else {
+        setIngestedLoading(true);
+      }
+      setIngestedError(null);
+
+      try {
+        let skip: number;
+        let take: number;
+
+        if (loadMore) {
+          skip = ingestedLoadedCount;
+          take = ingestedPagination.take;
+        } else if (silentRefresh) {
+          skip = 0;
+          take =
+            ingestedLoadedCount > 0
+              ? ingestedLoadedCount
+              : ingestedPagination.take;
+        } else {
+          skip = 0;
+          take = ingestedPagination.take;
+        }
+
+        const apiResponse = await fetchFilesFromApi({
+          contextId,
+          tab: "ingested",
+          skip,
+          take,
+        });
+
+        const filteredData = {
+          ...apiResponse,
+          data: apiResponse.data.filter(
+            (file) => file.isIngested && file.isUploaded && file.isRead
+          ),
+        };
+
+        const hasMoreData = apiResponse.data.length === ingestedPagination.take;
+        setIngestedHasMore(hasMoreData);
+
+        if (loadMore) {
+          setIngestedData((prev) =>
+            prev
+              ? {
+                  ...filteredData,
+                  data: [...prev.data, ...filteredData.data],
+                }
+              : filteredData
+          );
+          setIngestedLoadedCount((prev) => prev + filteredData.data.length);
+          setIngestedPagination((prev) => ({
+            ...prev,
+            currentPage: prev.currentPage + 1,
+          }));
+        } else {
+          setIngestedData(filteredData);
+          if (!silentRefresh) {
+            setIngestedLoadedCount(filteredData.data.length);
+          }
+        }
+
+        setTabCounts((prev) => ({
+          ...prev,
+          uploaded: apiResponse.uploadedCount,
+          ingested: apiResponse.ingestedCount,
+          total: apiResponse.totalCount,
+        }));
+      } catch (error) {
+        console.error("Error fetching ingested files:", error);
+        setIngestedError(
+          error instanceof Error ? error.message : "Failed to fetch files"
+        );
+        setIngestedHasMore(false);
+      } finally {
+        if (silentRefresh) {
+          setIngestedSilentLoading(false);
+        } else {
+          setIngestedLoading(false);
+        }
+      }
+    },
+    [contextId, ingestedPagination, ingestedLoadedCount]
+  );
+
+  const fetchUploadedFiles = useCallback(
+    async (loadMore = false, silentRefresh = false) => {
+      if (!contextId) return;
+
+      if (silentRefresh) {
+        setUploadedSilentLoading(true);
+      } else {
+        setUploadedLoading(true);
+      }
+      setUploadedError(null);
+
+      try {
+        let skip: number;
+        let take: number;
+
+        if (loadMore) {
+          skip = uploadedLoadedCount;
+          take = uploadedPagination.take;
+        } else if (silentRefresh) {
+          skip = 0;
+          take =
+            uploadedLoadedCount > 0
+              ? uploadedLoadedCount
+              : uploadedPagination.take;
+        } else {
+          skip = 0;
+          take = uploadedPagination.take;
+        }
+
+        const apiResponse = await fetchFilesFromApi({
+          contextId,
+          tab: "uploaded",
+          skip,
+          take,
+        });
+
+        const hasMoreData = apiResponse.data.length === uploadedPagination.take;
+        setUploadedHasMore(hasMoreData);
+
+        if (loadMore) {
+          setUploadedData((prev) =>
+            prev
+              ? {
+                  ...apiResponse,
+                  data: [...prev.data, ...apiResponse.data],
+                }
+              : apiResponse
+          );
+          setUploadedLoadedCount((prev) => prev + apiResponse.data.length);
+          setUploadedPagination((prev) => ({
+            ...prev,
+            currentPage: prev.currentPage + 1,
+          }));
+        } else {
+          setUploadedData(apiResponse);
+          if (!silentRefresh) {
+            setUploadedLoadedCount(apiResponse.data.length);
+          }
+        }
+
+        setTabCounts((prev) => ({
+          ...prev,
+          uploaded: apiResponse.uploadedCount,
+          ingested: apiResponse.ingestedCount,
+          total: apiResponse.totalCount,
+        }));
+      } catch (error) {
+        console.error("Error fetching uploaded files:", error);
+        setUploadedError(
+          error instanceof Error ? error.message : "Failed to fetch files"
+        );
+        setUploadedHasMore(false);
+      } finally {
+        if (silentRefresh) {
+          setUploadedSilentLoading(false);
+        } else {
+          setUploadedLoading(false);
+        }
+      }
+    },
+    [contextId, uploadedPagination, uploadedLoadedCount]
+  );
+
   useEffect(() => {
     fetchInitialCounts();
   }, [fetchInitialCounts]);
 
-  // Fetch data when tab changes (only if not already loaded)
   useEffect(() => {
-    if (!apiData[activeTab] && activeTab !== "progress") {
-      fetchFiles(activeTab);
+    if (activeTab === "total" && !totalData) {
+      fetchTotalFiles();
+    } else if (activeTab === "ingested" && !ingestedData) {
+      fetchIngestedFiles();
+    } else if (activeTab === "uploaded" && !uploadedData) {
+      fetchUploadedFiles();
     }
-  }, [activeTab, contextId, fetchFiles, apiData]);
+  }, [
+    activeTab,
+    contextId,
+    totalData,
+    ingestedData,
+    uploadedData,
+    fetchTotalFiles,
+    fetchIngestedFiles,
+    fetchUploadedFiles,
+  ]);
 
-  // Refresh function
+  useEffect(() => {
+    let interval: NodeJS.Timeout | undefined;
+    if (activeTab === "total" && !allFilesPollingStopped) {
+      interval = setInterval(() => {
+        if (!totalLoading && !totalSilentLoading) {
+          fetchTotalFiles(false, true);
+        }
+      }, 3000);
+    }
+    return () => {
+      if (interval) clearInterval(interval);
+    };
+  }, [
+    activeTab,
+    allFilesPollingStopped,
+    totalLoading,
+    totalSilentLoading,
+    fetchTotalFiles,
+  ]);
+
   const handleRefresh = () => {
-    if (activeTab !== "progress") {
-      fetchFiles(activeTab);
+    if (activeTab === "total") {
+      setTotalPagination({ skip: 0, take: 2, currentPage: 1 });
+      setTotalLoadedCount(0);
+      setTotalData(null);
+      fetchTotalFiles(false, false);
+    } else if (activeTab === "ingested") {
+      setIngestedPagination({ skip: 0, take: 2, currentPage: 1 });
+      setIngestedLoadedCount(0);
+      setIngestedData(null);
+      fetchIngestedFiles(false, false);
+    } else if (activeTab === "uploaded") {
+      setUploadedPagination({ skip: 0, take: 2, currentPage: 1 });
+      setUploadedLoadedCount(0);
+      setUploadedData(null);
+      fetchUploadedFiles(false, false);
     }
   };
 
   const renderFileList = (tab: string) => {
-    const isLoading = loading[tab];
-    const apiResponse = apiData[tab];
-    const errorMsg = error[tab];
+    let isLoading: boolean;
+    let apiResponse: ApiResponse | null;
+    let errorMsg: string | null;
+    let currentHasMore: boolean;
+    let currentPage: number;
+    let onLoadMore: () => void;
+
+    if (tab === "total") {
+      isLoading = totalLoading && !totalSilentLoading;
+      apiResponse = totalData;
+      errorMsg = totalError;
+      currentHasMore = totalHasMore;
+      currentPage = totalPagination.currentPage;
+      onLoadMore = () => fetchTotalFiles(true);
+    } else if (tab === "ingested") {
+      isLoading = ingestedLoading && !ingestedSilentLoading;
+      apiResponse = ingestedData;
+      errorMsg = ingestedError;
+      currentHasMore = ingestedHasMore;
+      currentPage = ingestedPagination.currentPage;
+      onLoadMore = () => fetchIngestedFiles(true);
+    } else {
+      isLoading = uploadedLoading && !uploadedSilentLoading;
+      apiResponse = uploadedData;
+      errorMsg = uploadedError;
+      currentHasMore = uploadedHasMore;
+      currentPage = uploadedPagination.currentPage;
+      onLoadMore = () => fetchUploadedFiles(true);
+    }
 
     if (isLoading) {
       return (
@@ -476,8 +684,8 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
           <Button
             variant="outline"
             size="sm"
-            onClick={() => fetchFiles(tab)}
-            className="text-xs"
+            onClick={handleRefresh}
+            className="text-xs bg-transparent"
           >
             <RefreshCw className="h-3 w-3 mr-1" />
             Retry
@@ -498,15 +706,13 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     }
 
     const files = convertToFileStatusItems(apiResponse.data, tab);
-    const currentHasMore = hasMore[tab];
-    const currentPage = pagination[tab]?.currentPage || 1;
     const totalLoaded = apiResponse.data.length;
 
     return (
       <ScrollArea className="h-[450px]">
         <div className="space-y-1 p-1">
           {files.map((file) => (
-            <CompactFileItem key={file.id} file={file} />
+            <CompactFileItem key={file.id} file={file} dirPath={dirPath} />
           ))}
           {currentHasMore && (
             <div className="flex justify-center p-3 border-t mt-2">
@@ -517,11 +723,11 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => fetchFiles(tab, true)}
-                  disabled={loading[tab]}
-                  className="text-xs"
+                  onClick={onLoadMore}
+                  disabled={isLoading}
+                  className="text-xs bg-transparent"
                 >
-                  {loading[tab] ? (
+                  {isLoading ? (
                     <>
                       <Loader2 className="h-3 w-3 animate-spin mr-1" />
                       Loading...
@@ -545,13 +751,16 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header */}
       <div className="flex items-center justify-between p-3 border-b bg-white">
         <div>
           <h2 className="text-base font-semibold text-gray-900">File Status</h2>
           <div className="flex items-center space-x-2 mt-1">
+            <h2 className="text-sm font-bold text-gray-600">
+              Folder Selected : {dirPath || "N/A"}
+            </h2>
+          </div>
+          <div className="flex items-center space-x-2 mt-1">
             <p className="text-xs text-gray-600">Context ID: {contextId}</p>
-            <ApiStatusIndicator />
           </div>
         </div>
         <div className="flex items-center space-x-2">
@@ -560,37 +769,34 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
             size="sm"
             onClick={handleRefresh}
             className="text-xs px-2 py-1 h-7"
-            disabled={loading[activeTab as keyof typeof loading]}
+            disabled={totalLoading || ingestedLoading || uploadedLoading}
           >
             <RefreshCw
-              className={`h-3 w-3 mr-1 ${loading[activeTab as keyof typeof loading] ? "animate-spin" : ""}`}
+              className={`h-3 w-3 mr-1 ${totalLoading || ingestedLoading || uploadedLoading ? "animate-spin" : ""}`}
             />
             Refresh
           </Button>
           <Button
             variant="outline"
             onClick={onBack}
-            className="text-xs px-3 py-1 h-7"
+            className="text-xs px-3 py-1 h-7 bg-transparent"
           >
             Back to Upload
           </Button>
         </div>
       </div>
 
-      {/* Tabs */}
       <div className="flex-1 p-3">
         <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full">
-          <TabsList
-            className={`grid w-full h-9 ${showIngestionProgress ? "grid-cols-4" : "grid-cols-3"}`}
-          >
+          <TabsList className={`grid w-full h-9  grid-cols-3`}>
             <TabsTrigger
-              value="uploaded"
+              value="total"
               className="flex items-center space-x-1 text-xs"
             >
-              <Upload className="h-3 w-3" />
-              <span>Uploaded</span>
-              <Badge variant="secondary" className="ml-1 text-xs px-1.5 py-0.5">
-                {tabCounts.uploaded}
+              <FileText className="h-3 w-3" />
+              <span>All Files</span>
+              <Badge variant="outline" className="ml-1 text-xs px-1.5 py-0.5">
+                {tabCounts.total}
               </Badge>
             </TabsTrigger>
             <TabsTrigger
@@ -603,63 +809,25 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
                 {tabCounts.ingested}
               </Badge>
             </TabsTrigger>
-            {showIngestionProgress && (
-              <TabsTrigger
-                value="progress"
-                className="flex items-center space-x-1 text-xs"
-              >
-                {allComplete ? (
-                  <CheckCircle className="h-3 w-3 text-green-500" />
-                ) : (
-                  <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
-                )}
-                <span>Processing</span>
-                <Badge
-                  variant={allComplete ? "default" : "secondary"}
-                  className="ml-1 text-xs px-1.5 py-0.5"
-                >
-                  {Object.values(statusMap).filter((s) => s.isComplete).length}/
-                  {filesForPolling.length}
-                </Badge>
-              </TabsTrigger>
-            )}
             <TabsTrigger
-              value="total"
+              value="progress"
               className="flex items-center space-x-1 text-xs"
             >
-              <FileText className="h-3 w-3" />
-              <span>All Files</span>
-              <Badge variant="outline" className="ml-1 text-xs px-1.5 py-0.5">
-                {tabCounts.total}
+              {allComplete ? (
+                <CheckCircle className="h-3 w-3 text-green-500" />
+              ) : (
+                <Loader2 className="h-3 w-3 animate-spin text-blue-500" />
+              )}
+              <span>Processing</span>
+              <Badge
+                variant={allComplete ? "default" : "secondary"}
+                className="ml-1 text-xs px-1.5 py-0.5"
+              >
+                {Object.values(statusMap).filter((s) => s.isComplete).length}/
+                {filesForPolling.length}
               </Badge>
             </TabsTrigger>
           </TabsList>
-
-          <TabsContent value="uploaded" className="mt-3 h-[calc(100%-50px)]">
-            <Card className="h-full">
-              <CardHeader className="pb-2 pt-3">
-                <div className="flex items-center justify-between">
-                  <CardTitle className="text-sm flex items-center space-x-2">
-                    <Upload className="h-4 w-4 text-blue-500" />
-                    <span>Uploaded Files</span>
-                    <Badge variant="secondary" className="ml-2 text-xs">
-                      {tabCounts.uploaded}
-                    </Badge>
-                  </CardTitle>
-                  {apiData.uploaded && (
-                    <span className="text-xs text-gray-500">
-                      Showing {apiData.uploaded.data.length} of{" "}
-                      {tabCounts.uploaded}
-                    </span>
-                  )}
-                </div>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {renderFileList("uploaded")}
-              </CardContent>
-            </Card>
-          </TabsContent>
-
           <TabsContent value="ingested" className="mt-3 h-[calc(100%-50px)]">
             <Card className="h-full">
               <CardHeader className="pb-2 pt-3">
@@ -671,10 +839,9 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
                       {tabCounts.ingested}
                     </Badge>
                   </CardTitle>
-                  {apiData.ingested && (
+                  {ingestedData && (
                     <span className="text-xs text-gray-500">
-                      Showing {apiData.ingested.data.length} of{" "}
-                      {tabCounts.ingested}
+                      Showing {ingestedData.data.length} of {tabCounts.ingested}
                     </span>
                   )}
                 </div>
@@ -685,112 +852,108 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
             </Card>
           </TabsContent>
 
-          {showIngestionProgress && (
-            <TabsContent value="progress" className="mt-3 h-[calc(100%-50px)]">
-              <Card className="h-full">
-                <CardHeader className="pb-2 pt-3">
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-sm flex items-center space-x-2">
-                      {allComplete ? (
-                        <CheckCircle className="h-4 w-4 text-green-500" />
-                      ) : (
-                        <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
-                      )}
-                      <span>Processing Status</span>
-                      <Badge
-                        variant={allComplete ? "default" : "secondary"}
-                        className="ml-2 text-xs"
-                      >
-                        {
-                          Object.values(statusMap).filter((s) => s.isComplete)
-                            .length
-                        }
-                        /{filesForPolling.length}
-                      </Badge>
-                    </CardTitle>
-                    <div className="flex flex-col items-end">
-                      <div className="text-xs text-gray-500">
-                        {allComplete
-                          ? "All Complete"
-                          : filesForPolling.length > 0
-                            ? `Processing ${filesForPolling.length} files...`
-                            : "No files to process"}
-                      </div>
-                      {processedFiles.length > 0 && (
-                        <div className="text-xs text-gray-400 mt-1">
-                          Showing {visibleProcessedFiles.length} of{" "}
-                          {processedFiles.length}
-                        </div>
-                      )}
+          <TabsContent value="progress" className="mt-3 h-[calc(100%-50px)]">
+            <Card className="h-full">
+              <CardHeader className="pb-2 pt-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-sm flex items-center space-x-2">
+                    {allComplete ? (
+                      <CheckCircle className="h-4 w-4 text-green-500" />
+                    ) : (
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-500" />
+                    )}
+                    <span>Processing Status</span>
+                    <Badge
+                      variant={allComplete ? "default" : "secondary"}
+                      className="ml-2 text-xs"
+                    >
+                      {
+                        Object.values(statusMap).filter((s) => s.isComplete)
+                          .length
+                      }
+                      /{filesForPolling.length}
+                    </Badge>
+                  </CardTitle>
+                  <div className="flex flex-col items-end">
+                    <div className="text-xs text-gray-500">
+                      {allComplete
+                        ? "All Complete"
+                        : filesForPolling.length > 0
+                          ? `Processing ${filesForPolling.length} files...`
+                          : "No files to process"}
                     </div>
+                    {processedFiles.length > 0 && (
+                      <div className="text-xs text-gray-400 mt-1">
+                        Showing {visibleProcessedFiles.length} of{" "}
+                        {processedFiles.length} files
+                      </div>
+                    )}
                   </div>
-                </CardHeader>
-                <CardContent className="pt-0">
-                  <ScrollArea className="h-[calc(100%-60px)]">
-                    <div className="space-y-2">
-                      {processedFiles.length === 0 ? (
-                        <div className="text-center py-8 text-gray-500">
-                          <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
-                          <p className="text-sm">
-                            Waiting for files to be ready for processing...
-                          </p>
-                        </div>
-                      ) : (
-                        <>
-                          {visibleProcessedFiles.map((file) => (
-                            <IngestionProgressItem
-                              key={file.id}
-                              file={{
-                                id: file.id.toString(),
-                                fileName: file.fileName,
-                                fileSize: parseInt(file.fileSize) || 0,
-                                fileType:
-                                  file.fileType || file.type || "unknown",
-                              }}
-                              status={statusMap[file.id.toString()]}
-                            />
-                          ))}
-                          {hasMoreProcessingFiles && (
-                            <div className="flex justify-center p-3 border-t mt-2">
-                              <div className="flex flex-col items-center space-y-2">
-                                <div className="text-xs text-gray-500">
-                                  Showing {visibleProcessedFiles.length} of{" "}
-                                  {processedFiles.length} files
-                                </div>
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  onClick={handleLoadMoreProcessing}
-                                  disabled={processingLoading}
-                                  className="text-xs"
-                                >
-                                  {processingLoading ? (
-                                    <>
-                                      <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                                      Loading...
-                                    </>
-                                  ) : (
-                                    "Load More"
-                                  )}
-                                </Button>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <ScrollArea className="h-[calc(100%-60px)]">
+                  <div className="space-y-2">
+                    {processedFiles.length === 0 ? (
+                      <div className="text-center py-8 text-gray-500">
+                        <Loader2 className="h-8 w-8 animate-spin mx-auto mb-2" />
+                        <p className="text-sm">
+                          Waiting for files to be ready for processing...
+                        </p>
+                      </div>
+                    ) : (
+                      <>
+                        {visibleProcessedFiles.map((file) => (
+                          <IngestionProgressItem
+                            key={file.id}
+                            file={{
+                              id: file.id.toString(),
+                              fileName: file.fileName,
+                              fileSize: Number.parseInt(file.fileSize) || 0,
+                              fileType: file.fileType || file.type || "unknown",
+                            }}
+                            status={statusMap[file.id.toString()]}
+                          />
+                        ))}
+                        {hasMoreProcessingFiles && (
+                          <div className="flex justify-center p-3 border-t mt-2">
+                            <div className="flex flex-col items-center space-y-2">
+                              <div className="text-xs text-gray-500">
+                                Showing {visibleProcessedFiles.length} of{" "}
+                                {processedFiles.length} files
                               </div>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={handleLoadMoreProcessing}
+                                disabled={processingLoading}
+                                className="text-xs bg-transparent"
+                              >
+                                {processingLoading ? (
+                                  <>
+                                    <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                                    Loading...
+                                  </>
+                                ) : (
+                                  "Load More"
+                                )}
+                              </Button>
+                            </div>
+                          </div>
+                        )}
+                        {!hasMoreProcessingFiles &&
+                          processedFiles.length > 0 && (
+                            <div className="text-center py-2 text-xs text-gray-500">
+                              All {processedFiles.length} files loaded
                             </div>
                           )}
-                          {!hasMoreProcessingFiles &&
-                            processedFiles.length > 0 && (
-                              <div className="text-center py-2 text-xs text-gray-500">
-                                All {processedFiles.length} files loaded
-                              </div>
-                            )}
-                        </>
-                      )}
-                    </div>
-                  </ScrollArea>
-                </CardContent>
-              </Card>
-            </TabsContent>
-          )}
-
+                      </>
+                    )}
+                  </div>
+                </ScrollArea>
+              </CardContent>
+            </Card>
+          </TabsContent>
           <TabsContent value="total" className="mt-3 h-[calc(100%-50px)]">
             <Card className="h-full">
               <CardHeader className="pb-2 pt-3">
@@ -802,9 +965,9 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
                       {tabCounts.total}
                     </Badge>
                   </CardTitle>
-                  {apiData.total && (
+                  {totalData && (
                     <span className="text-xs text-gray-500">
-                      Showing {apiData.total.data.length} of {tabCounts.total}
+                      Showing {totalData.data.length} of {tabCounts.total}
                     </span>
                   )}
                 </div>

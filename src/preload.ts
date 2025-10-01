@@ -6,16 +6,28 @@ const electronBridge: ElectronBridge = {
   selectDirectory: () => ipcRenderer.invoke("select-directory"),
   listFiles: (dirPath: string, contextId: number) =>
     ipcRenderer.invoke("list-files", dirPath, contextId),
-  createUploadContext: () => ipcRenderer.invoke("create-upload-context"),
+  createUploadContext: (
+    userId: string,
+    userEmail: string,
+    folderPath: string
+  ) =>
+    ipcRenderer.invoke("create-upload-context", userId, userEmail, folderPath),
   uploadFiles: (files: FileRecord[], contextId: number) =>
     ipcRenderer.invoke("upload-files", files, contextId),
+  reUploadFile: (
+    fileId: string,
+    fileName: string,
+    status: string,
+    dirPath: string
+  ) => ipcRenderer.invoke("re-upload", fileId, fileName, status, dirPath),
   onUploadProgress: (callback: (progress: UploadProgress) => void) => {
     ipcRenderer.on("upload-progress", (_event, progress) => callback(progress));
   },
   removeUploadProgressListener: () => {
     ipcRenderer.removeAllListeners("upload-progress");
   },
-  confirmFileUpload: (files: FileRecord[]) => ipcRenderer.invoke("confirm-file-upload", files),
+  confirmFileUpload: (files: FileRecord[]) =>
+    ipcRenderer.invoke("confirm-file-upload", files),
   onOAuthCallback: (callback: (url: string) => void) => {
     ipcRenderer.on("oauth-callback", (event, url) => callback(url));
   },
@@ -36,4 +48,4 @@ const electronBridge: ElectronBridge = {
   },
 };
 
-contextBridge.exposeInMainWorld('electronAPI', electronBridge);
+contextBridge.exposeInMainWorld("electronAPI", electronBridge);

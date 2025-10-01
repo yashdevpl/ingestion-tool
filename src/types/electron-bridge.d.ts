@@ -1,3 +1,4 @@
+import { fileStatus } from "../components/upload-form/CompactFileItem";
 import type { FileRecord } from "./common";
 
 export interface UploadProgress {
@@ -44,7 +45,7 @@ export interface FileStatusItem {
   fileSize: number;
   uploadDate?: string;
   ingestionDate?: string;
-  status: 'uploaded' | 'ingested' | 'failed';
+  status: fileStatus;
   fileType: string;
   errorMessage?: string;
 }
@@ -52,8 +53,15 @@ export interface FileStatusItem {
 export interface ElectronBridge {
   selectDirectory: () => Promise<string | null>;
   listFiles: (dirPath: string, contextId: number) => Promise<FileListResult>;
-  createUploadContext: () => Promise<UploadContext>;
-  uploadFiles: (files: FileRecord[], contextId: number) => Promise<UploadResult>;
+  createUploadContext: (
+    userId: string,
+    userEmail: string,
+    folderPath: string,
+  ) => Promise<UploadContext>;
+  uploadFiles: (
+    files: FileRecord[],
+    contextId: number
+  ) => Promise<UploadResult>;
   onUploadProgress: (callback: (progress: UploadProgress) => void) => void;
   removeUploadProgressListener: () => void;
   confirmFileUpload: (files: FileRecord[]) => Promise<void>;
@@ -63,4 +71,10 @@ export interface ElectronBridge {
   getPendingOAuthCallback: () => Promise<string | null>;
   onClearAuthOnClose: (callback: () => void) => void;
   removeClearAuthListener: () => void;
+  reUploadFile: (
+    fileId: string,
+    fileName: string,
+    status: string,
+    dirPath: string
+  ) => Promise<any>;
 }

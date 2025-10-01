@@ -4,6 +4,7 @@ import fs from "node:fs";
 import started from "electron-squirrel-startup";
 import workerpool from "workerpool";
 import { createUploadContext } from "./utils/helper-functions";
+import { retryFileUpload } from "./utils/retry-file";
 // Import worker path
 const isDevelopment = process.env.NODE_ENV === "development";
 const uploadWorker = path.join(__dirname, "uploadWorker.js");
@@ -255,10 +256,32 @@ ipcMain.handle("select-directory", async () => {
   return null;
 });
 
-ipcMain.handle("create-upload-context", async () => {
-  const contextDetails = await createUploadContext();
-  return contextDetails;
-});
+ipcMain.handle(
+  "re-upload",
+  async (_event, fileId, fileName, status, dirPath) => {
+    try {
+      const result = await retryFileUpload(fileId, fileName, status, dirPath);
+      return result;
+    } catch (error) {
+      console.error("Error in re-upload handler:", error);
+      return {
+        error: (error as Error).message || "Unknown error during retry",
+      };
+    }
+  }
+);
+
+ipcMain.handle(
+  "create-upload-context",
+  async (_event, userId: string, userEmail: string, folderPath: string) => {
+    const contextDetails = await createUploadContext(
+      userId,
+      userEmail,
+      folderPath
+    );
+    return contextDetails;
+  }
+);
 
 // Handle file upload confirmation
 ipcMain.handle("confirm-file-upload", async (_event, files: any[]) => {
@@ -344,40 +367,62 @@ ipcMain.handle(
     });
 
     try {
-      console.log(`Starting file processing for directory: ${dirPath} with contextId: ${contextId}`);
-      
+      console.log(
+        `Starting file processing for directory: ${dirPath} with contextId: ${contextId}`
+      );
+
       const listedFiles = await listedFilesWorkerPool.exec(
         "listAndClassifyFiles",
         [dirPath, contextId]
       );
-      
-      console.log(`File processing completed. Found ${listedFiles?.validFiles?.length || 0} valid files out of ${listedFiles?.allFiles?.length || 0} total files`);
-      
+
+      console.log(
+        `File processing completed. Found ${listedFiles?.validFiles?.length || 0} valid files out of ${listedFiles?.allFiles?.length || 0} total files`
+      );
+
       if (!listedFiles) {
         throw new Error("Worker returned no data - processing may have failed");
       }
 
       // Log any API call failures that might have occurred during processing
-      if (listedFiles.validationErrors && listedFiles.validationErrors.length > 0) {
-        console.warn(`Found ${listedFiles.validationErrors.length} validation errors during processing`);
+      if (
+        listedFiles.validationErrors &&
+        listedFiles.validationErrors.length > 0
+      ) {
+        console.warn(
+          `Found ${listedFiles.validationErrors.length} validation errors during processing`
+        );
       }
 
       return listedFiles;
     } catch (err: any) {
       console.error("File processing error in main process:", err);
-      
+
       // Provide more specific error information
       let errorMessage = "Unknown error occurred during file processing";
-      
+
       if (err.message) {
         if (err.message.includes("Worker terminated")) {
-          errorMessage = "File processing worker crashed - this may be due to memory issues or corrupted files";
-        } else if (err.message.includes("ENOENT") || err.message.includes("no such file")) {
-          errorMessage = "Directory or files not found - please check the selected path";
-        } else if (err.message.includes("EACCES") || err.message.includes("permission")) {
-          errorMessage = "Permission denied - unable to read files in the selected directory";
-        } else if (err.message.includes("network") || err.message.includes("ECONNREFUSED")) {
-          errorMessage = "Failed to connect to the API server - please ensure the server is running";
+          errorMessage =
+            "File processing worker crashed - this may be due to memory issues or corrupted files";
+        } else if (
+          err.message.includes("ENOENT") ||
+          err.message.includes("no such file")
+        ) {
+          errorMessage =
+            "Directory or files not found - please check the selected path";
+        } else if (
+          err.message.includes("EACCES") ||
+          err.message.includes("permission")
+        ) {
+          errorMessage =
+            "Permission denied - unable to read files in the selected directory";
+        } else if (
+          err.message.includes("network") ||
+          err.message.includes("ECONNREFUSED")
+        ) {
+          errorMessage =
+            "Failed to connect to the API server - please ensure the server is running";
         } else {
           errorMessage = err.message;
         }
@@ -391,13 +436,15 @@ ipcMain.handle(
         audioFiles: [],
         audioCriFiles: [],
         audioMetadataFiles: [],
-        validationErrors: [{
-          fileName: "System Error",
-          fileType: "system",
-          errors: [errorMessage],
-          isValid: false
-        }],
-        error: errorMessage
+        validationErrors: [
+          {
+            fileName: "System Error",
+            fileType: "system",
+            errors: [errorMessage],
+            isValid: false,
+          },
+        ],
+        error: errorMessage,
       };
     } finally {
       // Always terminate worker pools
@@ -408,7 +455,10 @@ ipcMain.handle(
         criParserWorkerPool.terminate();
         uploadWorkerPool.terminate();
       } catch (terminationError) {
-        console.warn("Warning: Could not terminate some worker pools:", terminationError);
+        console.warn(
+          "Warning: Could not terminate some worker pools:",
+          terminationError
+        );
       }
     }
   }

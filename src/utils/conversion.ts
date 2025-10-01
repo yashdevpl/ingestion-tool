@@ -1,5 +1,8 @@
+import { fileStatus } from "../components/upload-form/CompactFileItem";
+import { FileStatusItem } from "../components/upload-form/FileStatusTabs";
 import {
   CallLogEntry,
+  FileRecord,
   FileRecordMetadata,
   IMetadata,
   ParseResult,
@@ -187,6 +190,118 @@ const call_directions = [
   },
 ];
 
+export const createMetadataValidationSchema = (fileType: "audio" | "text") => {
+  if (fileType === "audio") {
+    // Audio/Call validation schema
+    return Yup.object({
+      targetNumber: Yup.string()
+        .required("Target Number is required")
+        .test(
+          "match-caller-callee",
+          "Target Number must match either Caller or Callee",
+          function (value) {
+            const { caller, callee } = this.parent;
+            if (!value) return false;
+            return value === caller || value === callee;
+          }
+        ),
+      target_code: Yup.string().required("Target code is required"),
+      caller: Yup.string()
+        .matches(/^\+?[1-9]\d{1,14}$/, "Please enter a valid phone number")
+        .required("Caller is required"),
+      callee: Yup.string()
+        .matches(/^\+?[1-9]\d{1,14}$/, "Please enter a valid phone number")
+        .required("Callee is required"),
+      direction: Yup.string()
+        .oneOf(
+          [
+            "6aacaec3-6b25-492e-8558-097078417aea",
+            "5b5fe700-2791-4892-ad53-0bee86e95aa7",
+            "a879922b-2632-4fbd-9920-120b44c500ca",
+          ],
+          "Direction must be incoming or outgoing"
+        )
+        .required("Direction is required"),
+      call_start: Yup.date().required("Call start time is required"),
+      call_end: Yup.date()
+        .required("Call end time is required")
+        .min(Yup.ref("call_start"), "End time must be after start time"),
+      imei: Yup.string().optional(),
+      imsi: Yup.string().optional(),
+      cell_id_start: Yup.string().optional(),
+      cell_id_end: Yup.string().optional(),
+      cell_address_start: Yup.string().optional(),
+      cell_address_end: Yup.string().optional(),
+      latitude_longitude_start: Yup.string().optional(),
+      latitude_longitude_end: Yup.string().optional(),
+    });
+  } else {
+    // SMS/Text validation schema
+    return Yup.object({
+      targetNumber: Yup.string()
+        .required("Target Number is required")
+        .test(
+          "match-sender-receiver",
+          "Target Number must match either Sender or Receiver",
+          function (value) {
+            const { sender, receiver } = this.parent;
+            if (!value) return false;
+            return value === sender || value === receiver;
+          }
+        ),
+      target_code: Yup.string().required("Target code is required"),
+      sender: Yup.string()
+        .matches(/^\+?[1-9]\d{1,14}$/, "Please enter a valid phone number")
+        .required("Sender is required"),
+      receiver: Yup.string()
+        .matches(/^\+?[1-9]\d{1,14}$/, "Please enter a valid phone number")
+        .required("Receiver is required"),
+      direction: Yup.string()
+        .oneOf(
+          [
+            "6aacaec3-6b25-492e-8558-097078417aea",
+            "5b5fe700-2791-4892-ad53-0bee86e95aa7",
+            "a879922b-2632-4fbd-9920-120b44c500ca",
+          ],
+          "Direction must be incoming or outgoing"
+        )
+        .required("Direction is required"),
+      sms_datetime: Yup.date().required("SMS date-time is required"),
+      imei: Yup.string().optional(),
+      imsi: Yup.string().optional(),
+      latitude: Yup.string().optional(),
+      longitude: Yup.string().optional(),
+      message: Yup.string().optional(),
+    });
+  }
+};
+
+export const validateMetadata = async (
+  metadata: any,
+  fileType: "audio" | "text",
+  fileName: string,
+  criFileName?: string
+) => {
+  const schema = createMetadataValidationSchema(fileType);
+  const errors: string[] = [];
+
+  try {
+    await schema.validate(metadata, { abortEarly: false });
+  } catch (validationError: any) {
+    if (validationError.inner) {
+      errors.push(...validationError.inner.map((err: any) => err.message));
+    }
+  }
+
+  return {
+    fileName,
+    fileType,
+    criFileName,
+    errors,
+    isValid: errors.length === 0,
+  };
+};
+
 export const createApiMetadata = (metadata: IMetadata) => {
   if (!metadata) return null;
 
@@ -212,7 +327,7 @@ export const createApiMetadata = (metadata: IMetadata) => {
           ? new Date(getValidISOStringFromCri(metadata?.endTime) || "")
           : undefined,
       direction: call_directions.find(
-        (dir) => dir.value === metadata?.direction.toUpperCase()
+        (dir) => dir.value === metadata?.direction?.toUpperCase()
       )?.uuid,
       caller: metadata?.calledNumber,
       callee: metadata?.callingNumber,
@@ -250,7 +365,7 @@ export const createApiMetadata = (metadata: IMetadata) => {
       imei: metadata?.imeiB,
       imsi: metadata?.imsiB,
       direction: call_directions.find(
-        (dir) => dir.value === metadata?.direction.toUpperCase()
+        (dir) => dir.value === metadata?.direction?.toUpperCase()
       )?.uuid,
       latitude: metadata?.latitudeB,
       longitude: metadata?.longitudeB,
@@ -269,62 +384,91 @@ export const validationSchemaForm = Yup.object({
     .min(1, "At least one file is required")
     .required("Files are required"),
 });
-export const createMetadataValidationSchema = (fileType: "audio" | "text") => {
-  const baseSchema: any = {
-    targetNumber: Yup.string()
-      .required("Target Number is required")
-      .test(
-        "match-caller-callee",
-        "Target Number must match either Caller or Callee",
-        function (value) {
-          const { caller, callee } = this.parent;
-          if (!value) return false;
-          return value === caller || value === callee;
-        }
-      ),
 
-    trackingCode: Yup.string().required("Target code is required"),
-
-    caller: Yup.string()
-      .matches(
-        fileType === "audio" ? /^\+?[1-9]\d{1,14}$/ : /^(AZ)[A-Z]$/,
-        "Please enter a valid phone number"
-      )
-      .required(
-        fileType === "audio" ? "Caller is required" : "Sender is required"
-      ),
-
-    callee: Yup.string()
-      .matches(
-        fileType === "audio" ? /^\+?[1-9]\d{1,14}$/ : /^(AZ)[A-Z]$/,
-        "Please enter a valid phone number"
-      )
-      .required(
-        fileType === "audio" ? "Callee is required" : "Receiver is required"
-      ),
-
-    direction: Yup.string()
-      .oneOf(
-        [
-          "6aacaec3-6b25-492e-8558-097078417aea",
-          "5b5fe700-2791-4892-ad53-0bee86e95aa7",
-          "a879922b-2632-4fbd-9920-120b44c500ca",
-        ],
-        "Direction must be incoming or outgoing"
-      )
-      .required("Direction is required"),
-  };
-
-  if (fileType === "audio") {
-    baseSchema.startTime = Yup.date().required("Call start time is required");
-    baseSchema.endTime = Yup.date()
-      .required("Call end time is required")
-      .min(Yup.ref("startTime"), "End time must be after start time");
-  } else {
-    baseSchema.startTime = Yup.date().required("SMS date-time is required");
-    baseSchema.caller = Yup.string().required("Sender is required");
-    baseSchema.callee = Yup.string().required("Receiver is required");
+export const getFileStatus = (
+  file: FileRecord,
+  tab: string
+): fileStatus | string => {
+  if (
+    file.isIngested &&
+    file.isRead &&
+    file.isUploaded &&
+    file.requestId &&
+    file.requestStatus &&
+    tab !== "ingested"
+  ) {
+    return file.requestStatus || "N/A";
+  }
+  if (file.isIngested) {
+    return "ingested";
+  }
+  if (file.isUploaded) {
+    return "uploaded";
+  }
+  if (file.isRead) {
+    return "read";
+  }
+  if (!file.isIngested || !file.isUploaded || !file.isRead) {
+    if (!file.isRead) {
+      return "failed_read";
+    } else if (!file.isUploaded) {
+      return "failed_upload";
+    } else if (!file.isIngested) {
+      return "failed_ingest";
+    }
   }
 
-  return Yup.object(baseSchema);
+  return "ingested";
+};
+
+export const convertToFileStatusItems = (
+  files: FileRecord[],
+  tabType: string
+): FileStatusItem[] => {
+  return files.map((file) => ({
+    id: file.id.toString(),
+    fileName: file.fileName,
+    fileSize: Number.parseInt(file.fileSize),
+    uploadDate: file.uploadedAt,
+    ingestionDate: file.isIngested ? file.uploadedAt : undefined,
+    status: getFileStatus(file, tabType),
+    fileType: file.fileType,
+    errorMessage:
+      !file.isUploaded && !file.isIngested ? "Upload failed" : undefined,
+  }));
+};
+
+
+export const formatDate = (dateString: string) => {
+  const date = new Date(dateString);
+
+  // Date in dd/mm/yy
+  const formattedDate = date.toLocaleDateString("en-GB", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit"
+  });
+  const day = date.toLocaleDateString("en-GB", {
+    day: "2-digit"
+  });
+
+  // Time in hh:mm (24-hour format)
+  const formattedTime = date.toLocaleTimeString("en-GB", {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false // set to true if you want AM/PM
+  });
+
+  const monthName = date.toLocaleDateString("en-GB", {
+    month: "short"
+  });
+  const month = date.toLocaleDateString("en-GB", {
+    month: "2-digit"
+  });
+
+  const year = date.toLocaleDateString("en-GB", {
+    year: "numeric"
+  });
+
+  return { formattedDate, formattedTime, month, year, monthName, day };
 };

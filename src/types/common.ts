@@ -111,8 +111,9 @@ export interface Context {
   machineHost: string;
   browserInfo: BrowserInfo;
   metadata: Record<string, any>;
-  requestId: string;
-  createdAt: string; // ISO date string
+  createdAt: string;
+  machineId: string;
+  folderPath: string;
 }
 
 export interface FileRecord {
@@ -127,7 +128,9 @@ export interface FileRecord {
   isUploaded: boolean;
   isRead: boolean;
   isIngested: boolean;
+  requestId: string;
   uploadedAt: string; // ISO date string
   contextId: number;
   context: Context;
+  requestStatus: string;
 }

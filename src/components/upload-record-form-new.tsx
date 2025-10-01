@@ -1,7 +1,12 @@
 import { Upload } from "lucide-react";
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 
+import { useAuthContextProvider } from "../context/auth-context";
 import { useFilePolling } from "../hooks/use-file-polling";
+import {
+  COMPLETE_STATUSES,
+  FAILED_STATUSES,
+} from "../hooks/use-ingestion-polling";
 import { useToast } from "../hooks/use-toast";
 import type { FileRecord } from "../types/common";
 import { ElectronBridge } from "../types/electron-bridge";
@@ -93,7 +98,7 @@ const UploadRecordForm: React.FC = () => {
   });
 
   const { toast } = useToast();
-
+  const { userInfo } = useAuthContextProvider();
   const { data, loading, error, start, stop, isActive } = useFilePolling<{
     data: FileRecord[];
     totalCount?: number;
@@ -258,7 +263,7 @@ const UploadRecordForm: React.FC = () => {
       console.log("Retry: Failed file IDs:", failedFileIds);
 
       // Start polling like in the original upload flow
-      start(`contextId=${contextId.toString()}`);
+      // start(`contextId=${contextId.toString()}`);
 
       // Use the same upload logic but only for failed files
       await startUpload(filesToRetry);
@@ -376,9 +381,13 @@ const UploadRecordForm: React.FC = () => {
     try {
       // Create upload context first
       console.log("Creating upload context...");
-      const context = await window.electronAPI.createUploadContext();
+      const context = await window.electronAPI.createUploadContext(
+        userInfo?.sub || "",
+        userInfo?.email || "",
+        path
+      );
       setContextId(context.id);
-      console.log("Upload context created:", context.id);
+      console.log("Upload context created:", context);
 
       // List and process files
       console.log("Starting file processing for path:", path);
@@ -688,6 +697,17 @@ const UploadRecordForm: React.FC = () => {
     }
   }, [data, loading, uploadStarted, uploadStats.total, uploadError]);
 
+  useEffect(() => {
+    const allIngested = data?.data.every(
+      (file) =>
+        COMPLETE_STATUSES.includes(file.requestStatus?.toUpperCase()) ||
+        FAILED_STATUSES.includes(file.requestStatus?.toUpperCase())
+    );
+    if (allIngested) {
+      stop();
+    }
+  }, [data]);
+
   return (
     <div className="flex max-h-screen w-full flex-col overflow-hidden">
       {/* Always show these dialogs */}
@@ -829,6 +849,7 @@ const UploadRecordForm: React.FC = () => {
 
       {uiMode === "status" && (
         <FileStatusTabs
+          dirPath={dirPath || ""}
           contextId={contextId}
           onBack={handleBackToUpload}
           onProcessingStart={handleProcessingStart}

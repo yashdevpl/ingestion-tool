@@ -19,7 +19,7 @@ export const ReadingFilesDialog: React.FC<ReadingFilesDialogProps> = ({
 }) => {
   return (
     <Dialog open={isOpen} onOpenChange={() => {}}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent showCloseButton={false} className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Reading Files</DialogTitle>
           <DialogDescription>

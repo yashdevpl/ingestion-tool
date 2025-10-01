@@ -15,7 +15,7 @@ import {
 } from "../ui/accordion";
 import { Button } from "../ui/button";
 
-interface ReadFilesData {
+export interface ReadFilesData {
   dirPath: string;
   smsFiles: number;
   audioFiles: number;
@@ -80,7 +80,9 @@ export const FilesSummaryDialog: React.FC<FilesSummaryDialogProps> = ({
                 </div>
               </div>
               <div className="bg-slate-50 p-4 rounded-lg">
-                <div className="text-sm text-slate-600 mb-1">Metadata Files</div>
+                <div className="text-sm text-slate-600 mb-1">
+                  Metadata Files
+                </div>
                 <div className="text-2xl font-semibold text-slate-900">
                   {readFilesData?.audioMetadataFiles}
                 </div>
@@ -96,7 +98,8 @@ export const FilesSummaryDialog: React.FC<FilesSummaryDialogProps> = ({
                     Validation Errors Found
                   </div>
                   <div className="px-2 py-1 bg-red-100 text-red-700 rounded text-xs font-medium">
-                    {readFilesData.errors.length} file{readFilesData.errors.length > 1 ? 's' : ''} affected
+                    {readFilesData.errors.length} file
+                    {readFilesData.errors.length > 1 ? "s" : ""} affected
                   </div>
                 </div>
 
@@ -212,7 +215,8 @@ export const FilesSummaryDialog: React.FC<FilesSummaryDialogProps> = ({
                       return seconds > 0
                         ? `${minutes}m ${seconds}s`
                         : `${minutes}m`;
-                    })()} </div>
+                    })()}{" "}
+                  </div>
                   <div className="text-xs text-slate-500">approximate</div>
                 </div>
               </div>
@@ -249,10 +253,11 @@ export const FilesSummaryDialog: React.FC<FilesSummaryDialogProps> = ({
             {/* Action Buttons */}
             <div className="flex justify-center gap-4">
               {(() => {
-                const hasValidFiles = readFilesData.totalFiles && readFilesData.totalFiles > 0;
+                const hasValidFiles =
+                  readFilesData.totalFiles && readFilesData.totalFiles > 0;
                 console.log("FilesSummaryDialog button logic:", {
                   totalFiles: readFilesData.totalFiles,
-                  hasValidFiles: hasValidFiles
+                  hasValidFiles: hasValidFiles,
                 });
                 return hasValidFiles;
               })() ? (
