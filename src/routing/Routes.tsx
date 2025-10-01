@@ -1,4 +1,4 @@
-import { BrowserRouter, Route, Routes } from "react-router-dom";
+import { HashRouter, Route, Routes } from "react-router-dom";
 import Login from "../Login";
 import FileUploadsTable from "../pages/upload-files";
 import UploadHistory from "../pages/upload-history";
@@ -6,7 +6,7 @@ import UploadRecords from "../pages/upload-records";
 
 export const Routing = () => {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Login />}>
           <Route index element={<UploadRecords />} /> {/* default child */}
@@ -17,6 +17,6 @@ export const Routing = () => {
           />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   );
 };
