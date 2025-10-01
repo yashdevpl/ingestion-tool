@@ -1,13 +1,12 @@
-name: Build Electron App
+name: Release Electron App
 
 on:
   push:
-    branches: [ main ]
-  pull_request:
-    branches: [ main ]
+    tags:
+      - 'v*.*.*'
 
 jobs:
-  build:
+  release:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
@@ -25,11 +24,7 @@ jobs:
       - name: Install dependencies
         run: npm install
 
-      - name: Make Electron app
-        run: npm run make
-
-      - name: Upload packaged app
-        uses: actions/upload-artifact@v4
-        with:
-          name: vox-app-${{ matrix.os }}
-          path: out/make/**
+      - name: Publish Electron app
+        run: npm run publish
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
