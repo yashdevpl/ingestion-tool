@@ -1,6 +1,6 @@
-import workerpool from "workerpool";
-import { ENV } from "../utils/constants";
 import dotenv from "dotenv";
+import workerpool from "workerpool";
+import { getBaseUrl } from "../utils/helper-functions";
 dotenv.config();
 
 interface FileMetadata {
@@ -161,11 +161,8 @@ export async function uploadFiles(files: UploadFile[]) {
   // Process audio files in batches
   for (let i = 0; i < audioFiles.length; i += BATCH_SIZE) {
     const batch = audioFiles.slice(i, i + BATCH_SIZE);
-    const result = await uploadBatch(
-      batch,
-      `${process.env.WEB_APP_PROXY_URL}/api/ingestion`,
-      "call"
-    );
+    const baseUrl = getBaseUrl();
+    const result = await uploadBatch(batch, `${baseUrl}/api/ingestion`, "call");
 
     if (result.success) {
       results.successful.push(...result.fileIds);
@@ -197,11 +194,8 @@ export async function uploadFiles(files: UploadFile[]) {
   // Process SMS files in batches
   for (let i = 0; i < smsFiles.length; i += BATCH_SIZE) {
     const batch = smsFiles.slice(i, i + BATCH_SIZE);
-    const result = await uploadBatch(
-      batch,
-      `${process.env.WEB_APP_PROXY_URL}/api/ingestion/sms`,
-      "sms"
-    );
+    const baseUrl = getBaseUrl();
+    const result = await uploadBatch(batch, `${baseUrl}/api/ingestion/sms`, "sms");
 
     if (result.success) {
       results.successful.push(...result.fileIds);

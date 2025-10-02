@@ -51,12 +51,14 @@ export interface FileStatusItem {
 }
 
 export interface ElectronBridge {
+  get: (key: string) => Promise<any>;
+  set: (key: string, value: any) => Promise<void>;
   selectDirectory: () => Promise<string | null>;
   listFiles: (dirPath: string, contextId: number) => Promise<FileListResult>;
   createUploadContext: (
     userId: string,
     userEmail: string,
-    folderPath: string,
+    folderPath: string
   ) => Promise<UploadContext>;
   uploadFiles: (
     files: FileRecord[],

@@ -10,11 +10,13 @@ import {
 import { fileStatus } from "../components/upload-form/CompactFileItem";
 import { FileRecord } from "../types/common";
 import dotenv from "dotenv";
+import { getBaseUrl } from "./helper-functions";
 dotenv.config();
 export const updateFileDetails = async (updateData: Partial<FileRecord>) => {
   try {
+    const baseUrl = getBaseUrl();
     const { data, status } = await axios.put(
-      `${process.env.WEB_APP_PROXY_URL}/api/file-uploads/`,
+      `${baseUrl}/api/file-uploads/`,
       updateData
     );
     return status === 200 ? data : null;

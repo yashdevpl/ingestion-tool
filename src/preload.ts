@@ -3,6 +3,8 @@ import type { ElectronBridge, UploadProgress } from "./types/electron-bridge";
 import type { FileRecord } from "./types/common";
 
 const electronBridge: ElectronBridge = {
+  get: (key) => ipcRenderer.invoke("store-get", key),
+  set: (key, value) => ipcRenderer.invoke("store-set", { key, value }),
   selectDirectory: () => ipcRenderer.invoke("select-directory"),
   listFiles: (dirPath: string, contextId: number) =>
     ipcRenderer.invoke("list-files", dirPath, contextId),

@@ -1,13 +1,12 @@
+import axios from "axios";
+import { AlertCircle, Database, RefreshCw } from "lucide-react";
 import { useEffect, useState } from "react";
-import { Context } from "../types/common";
+import { useNavigate } from "react-router-dom";
 import { ColumnDefinition, DataTable } from "../components/data-table";
-import { formatDate } from "../utils/conversion";
 import { Badge } from "../components/ui/badge";
 import { useAuthContextProvider } from "../context/auth-context";
-import { AlertCircle, Database, RefreshCw } from "lucide-react";
-import axios from "axios";
-import { useNavigate } from "react-router-dom";
-import { ENV } from "../utils/constants";
+import { Context } from "../types/common";
+import { formatDate } from "../utils/conversion";
 
 type Pagination = {
   page: number;
@@ -20,7 +19,7 @@ type Pagination = {
 const ContextsTable = () => {
   const [pagination, setPagination] = useState<Pagination>({
     page: 0,
-    limit: 2,
+    limit: 50,
     totalItems: 0,
     totalPages: 0,
     filteredCount: 0,
@@ -31,7 +30,7 @@ const ContextsTable = () => {
   const [initialLoad, setInitialLoad] = useState<boolean>(true);
   const router = useNavigate();
 
-  const { userInfo } = useAuthContextProvider();
+  const { userInfo, webProxyUrl } = useAuthContextProvider();
 
   const getContextHistory = async (page: number, limit: number) => {
     setLoading(true);
@@ -40,7 +39,7 @@ const ContextsTable = () => {
     try {
       const skip = page * limit;
       const response = await axios.get(
-        `${ENV.WEB_APP_PROXY_URL}/api/upload-context/${userInfo?.sub || ""}?skip=${skip}&take=${limit}`
+        `${webProxyUrl}/api/upload-context/${userInfo?.sub || ""}?skip=${skip}&take=${limit}`
       );
 
       if (response.data) {
@@ -69,7 +68,7 @@ const ContextsTable = () => {
   }, [userInfo?.sub]);
 
   const handleRetry = () => {
-    getContextHistory(pagination.page - 1, pagination.limit);
+    getContextHistory(pagination.page + 1, pagination.limit);
   };
 
   const columns: Array<ColumnDefinition<Context>> = [

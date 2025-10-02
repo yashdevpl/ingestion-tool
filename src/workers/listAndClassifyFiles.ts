@@ -10,6 +10,7 @@ import {
   parseCallLogFile,
   validateMetadata,
 } from "../utils/conversion";
+import { getBaseUrl } from "../utils/helper-functions";
 dotenv.config();
 
 export function getFileType(filePath: string): string {
@@ -45,11 +46,8 @@ export const createFileDetails = async (
     console.log(
       `Creating file details for: ${file.name} (contextId: ${contextId})`
     );
-
-    const fileDetails = await axios.post(
-      `${process.env.VITE_WEB_APP_PROXY_URL}/file-uploads`,
-      body
-    );
+    const baseUrl = getBaseUrl();
+    const fileDetails = await axios.post(`${baseUrl}/api/file-uploads`, body);
 
     if (fileDetails.status === 200 || fileDetails.status === 201) {
       console.log(`Successfully created file details for: ${file.name}`);

@@ -3,12 +3,14 @@ import { Badge } from "../ui/badge";
 import { Wifi, WifiOff } from "lucide-react";
 import { ENV } from "../../utils/constants";
 
+const webProxyUrl =
+  window.electronAPI.get("server-url") || ENV.WEB_APP_PROXY_URL;
 interface ApiStatusIndicatorProps {
   baseUrl?: string;
 }
 
 export const ApiStatusIndicator: React.FC<ApiStatusIndicatorProps> = ({
-  baseUrl = ENV.WEB_APP_PROXY_URL,
+  baseUrl = webProxyUrl,
 }) => {
   const [isOnline, setIsOnline] = useState(true);
   const [isChecking, setIsChecking] = useState(false);

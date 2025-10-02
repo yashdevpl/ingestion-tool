@@ -17,6 +17,7 @@ import {
 } from "../components/upload-form/CompactFileItem";
 import { Button } from "../components/ui/button";
 import { ENV } from "../utils/constants";
+import { useAuthContextProvider } from "../context/auth-context";
 
 type FileUpload = {
   id: number;
@@ -59,7 +60,7 @@ const FileUploadsTable = () => {
   const { folderPath, userEmail } = location.state || {};
   const [pagination, setPagination] = useState<Pagination>({
     page: 0,
-    limit: 2,
+    limit: 50,
     totalItems: 0,
     totalPages: 0,
     filteredCount: 0,
@@ -75,6 +76,7 @@ const FileUploadsTable = () => {
     ingestedCount: 0,
   });
   const router = useNavigate();
+  const { webProxyUrl } = useAuthContextProvider();
 
   const getFileUploads = async (page: number, limit: number) => {
     if (!contextId) {
@@ -88,7 +90,7 @@ const FileUploadsTable = () => {
     try {
       const skip = page * limit;
       const response = await axios.get<FileUploadsResponse>(
-        `${ENV.WEB_APP_PROXY_URL}/api/file-uploads?contextId=${contextId}&skip=${skip}&take=${limit}`
+        `${webProxyUrl}/api/file-uploads?contextId=${contextId}&skip=${skip}&take=${limit}`
       );
 
       if (response.data) {

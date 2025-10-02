@@ -5,6 +5,13 @@ import started from "electron-squirrel-startup";
 import workerpool from "workerpool";
 import { createUploadContext } from "./utils/helper-functions";
 import { retryFileUpload } from "./utils/retry-file";
+import Store from "electron-store";
+
+import { createStore } from './utils/store-config';
+
+// Initialize store
+export const store = createStore();
+
 // Import worker path
 const isDevelopment = process.env.NODE_ENV === "development";
 const uploadWorker = path.join(__dirname, "uploadWorker.js");
@@ -463,3 +470,12 @@ ipcMain.handle(
     }
   }
 );
+
+ipcMain.handle("store-get", (event, key) => {
+  return store.get(key);
+});
+
+ipcMain.handle("store-set", (event, { key, value }) => {
+  store.set(key, value);
+  return true;
+});

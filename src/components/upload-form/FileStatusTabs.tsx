@@ -63,6 +63,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { IngestionProgressItem } from "./IngestionProgressItem";
 import { ENV } from "../../utils/constants";
+import { useAuthContextProvider } from "../../context/auth-context";
 
 export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
   dirPath,
@@ -226,12 +227,12 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     },
     [allFilesWithStatus]
   );
-
+  const { webProxyUrl } = useAuthContextProvider();
   // Start ingestion polling
   const { statusMap, isPolling, allComplete, activePollingCount } =
     useIngestionPolling({
       files: filesForPolling,
-      baseUrl: ENV.WEB_APP_PROXY_URL || "http://localhost:3001",
+      baseUrl: webProxyUrl || "http://localhost:3001",
       isEnabled: true,
       pollingInterval: 3000,
       onFileStatusChange: handleFileStatusChange,
@@ -300,7 +301,10 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
     if (!contextId || initialCountsLoaded) return;
 
     try {
-      const apiResponse = await fetchInitialCountsFromApi(contextId);
+      const apiResponse = await fetchInitialCountsFromApi(
+        contextId,
+        webProxyUrl
+      );
 
       setTabCounts({
         uploaded: apiResponse.uploadedCount,
@@ -351,6 +355,7 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
           tab: "total",
           skip,
           take,
+          baseUrl: webProxyUrl,
         });
 
         const hasMoreData = apiResponse.data.length === totalPagination.take;
@@ -434,6 +439,7 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
           tab: "ingested",
           skip,
           take,
+          baseUrl: webProxyUrl,
         });
 
         const filteredData = {
@@ -524,6 +530,7 @@ export const FileStatusTabs: React.FC<FileStatusTabsProps> = ({
           tab: "uploaded",
           skip,
           take,
+          baseUrl: webProxyUrl,
         });
 
         const hasMoreData = apiResponse.data.length === uploadedPagination.take;

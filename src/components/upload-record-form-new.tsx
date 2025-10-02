@@ -97,16 +97,15 @@ const UploadRecordForm: React.FC = () => {
     ingested: 0,
     failed: 0,
   });
-
   const { toast } = useToast();
-  const { userInfo } = useAuthContextProvider();
+  const { userInfo, webProxyUrl } = useAuthContextProvider();
   const { data, loading, error, start, stop, isActive } = useFilePolling<{
     data: FileRecord[];
     totalCount?: number;
     uploadedCount?: number;
     ingestedCount?: number;
   }>({
-    url: `${ENV.WEB_APP_PROXY_URL}/api/file-uploads`,
+    url: `${webProxyUrl}/api/file-uploads`,
     interval: 4000,
   });
 
@@ -381,7 +380,7 @@ const UploadRecordForm: React.FC = () => {
 
     try {
       // Create upload context first
-      console.log("Creating upload context...");
+      console.log("Creating upload context...", userInfo);
       const context = await window.electronAPI.createUploadContext(
         userInfo?.sub || "",
         userInfo?.email || "",

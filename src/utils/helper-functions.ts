@@ -1,5 +1,17 @@
 import axios from "axios";
 import { machineId } from "node-machine-id";
+import dotenv from "dotenv";
+import { createStore } from "./store-config";
+dotenv.config();
+
+// Create a store instance for this module
+const store = createStore();
+
+export const getBaseUrl = () => {
+  const serverUrl = store.get("server-url");
+  console.log('[helper-functions] getBaseUrl:', { serverUrl });
+  return serverUrl || process.env.VITE_WEB_APP_PROXY_URL;
+};
 
 function parseBrowserInfo(userAgent: string) {
   const match = userAgent.match(/(Chrome|Firefox|Safari|Edge)\/([\d.]+)/);
@@ -36,15 +48,13 @@ export const createUploadContext = async (
   try {
     console.log("Creating upload context...", { folderPath });
     const body = await getClientInfo();
-    const res = await axios.post(
-      `${import.meta.env.VITE_WEB_APP_PROXY_URL}/upload-context`,
-      {
-        ...body,
-        uploadedBy,
-        userEmail,
-        folderPath,
-      }
-    );
+    const baseUrl = getBaseUrl();
+    const res = await axios.post(`${baseUrl}/api/upload-context`, {
+      ...body,
+      uploadedBy,
+      userEmail,
+      folderPath,
+    });
     return res.data;
   } catch (err) {
     console.log(err);
