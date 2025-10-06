@@ -386,7 +386,8 @@ const UploadRecordForm: React.FC = () => {
         userInfo?.email || "",
         path
       );
-      setContextId(context.id);
+      console.log("Upload context created:", context);
+      setContextId(context?.id);
       console.log("Upload context created:", context);
 
       // List and process files

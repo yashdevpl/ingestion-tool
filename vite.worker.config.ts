@@ -3,15 +3,15 @@ import { defineConfig } from 'vite';
 // https://vitejs.dev/config
 export default defineConfig({
   resolve: {
-    // Some libs that can run in both Web and Node.js environments
-    // require some special handling to work in Vite's build for Node.js
     conditions: ['node'],
     mainFields: ['module', 'jsnext:main', 'jsnext'],
   },
   build: {
     rollupOptions: {
       external: [
+        // Only externalize Node.js built-in modules and electron-related modules
         'electron',
+        'electron-store',
         'fs',
         'path',
         'os',
@@ -38,8 +38,7 @@ export default defineConfig({
         'vm',
         'v8',
         'perf_hooks'
-        // Removed workerpool from externals since main process uses it
-        // Keep axios, dotenv, mime, p-limit external since main process doesn't use them directly
+        // Bundle npm dependencies like workerpool, axios, etc.
       ],
     },
   },

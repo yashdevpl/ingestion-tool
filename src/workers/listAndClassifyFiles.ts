@@ -10,7 +10,6 @@ import {
   parseCallLogFile,
   validateMetadata,
 } from "../utils/conversion";
-import { getBaseUrl } from "../utils/helper-functions";
 dotenv.config();
 
 export function getFileType(filePath: string): string {
@@ -28,7 +27,8 @@ const limit = pLimit(FILE_CONCURRENCY);
 export const createFileDetails = async (
   file: any,
   filePath: string,
-  contextId: number
+  contextId: number,
+  serverUrl: string
 ) => {
   try {
     const body = {
@@ -46,8 +46,7 @@ export const createFileDetails = async (
     console.log(
       `Creating file details for: ${file.name} (contextId: ${contextId})`
     );
-    const baseUrl = getBaseUrl();
-    const fileDetails = await axios.post(`${baseUrl}/api/file-uploads`, body);
+    const fileDetails = await axios.post(`${serverUrl}/api/file-uploads`, body);
 
     if (fileDetails.status === 200 || fileDetails.status === 201) {
       console.log(`Successfully created file details for: ${file.name}`);
@@ -86,7 +85,8 @@ export const createFileDetails = async (
 
 export const listAndClassifyFiles = async (
   dirPath: string,
-  contextId: number
+  contextId: number,
+  serverUrl: string
 ): Promise<{
   allFiles: any[];
   smsFiles: any[];
@@ -117,7 +117,11 @@ export const listAndClassifyFiles = async (
           let metaData: any = null;
 
           if (stat.isDirectory()) {
-            const subResults = await listAndClassifyFiles(fullPath, contextId);
+            const subResults = await listAndClassifyFiles(
+              fullPath,
+              contextId,
+              serverUrl
+            );
             results.push(...subResults.allFiles);
             smsFiles.push(...subResults.smsFiles);
             audioFiles.push(...subResults.audioFiles);
@@ -266,7 +270,8 @@ export const listAndClassifyFiles = async (
         const fileDetails = await createFileDetails(
           smsFile,
           smsFile.path,
-          contextId
+          contextId,
+          serverUrl
         );
         validFilesWithDetails.push({
           ...smsFile,
@@ -292,7 +297,8 @@ export const listAndClassifyFiles = async (
         const fileDetails = await createFileDetails(
           audioFile,
           audioFile.path,
-          contextId
+          contextId,
+          serverUrl
         );
         validFilesWithDetails.push({
           ...audioFile,

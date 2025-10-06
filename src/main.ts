@@ -7,14 +7,24 @@ import { createUploadContext } from "./utils/helper-functions";
 import { retryFileUpload } from "./utils/retry-file";
 import Store from "electron-store";
 
-import { createStore } from './utils/store-config';
+import { createStore } from "./utils/store-config";
 
 // Initialize store
 export const store = createStore();
 
-// Import worker path
+// Import worker paths
 const isDevelopment = process.env.NODE_ENV === "development";
-const uploadWorker = path.join(__dirname, "uploadWorker.js");
+
+// Helper function to get worker path
+const getWorkerPath = (workerName: string): string => {
+  if (isDevelopment) {
+    return path.join(__dirname, `${workerName}.js`);
+  }
+  // In production, workers should be in the same directory as main
+  return path.join(__dirname, `${workerName}.js`);
+};
+
+const uploadWorker = getWorkerPath("uploadWorker");
 
 if (started) {
   app.quit();
@@ -281,10 +291,16 @@ ipcMain.handle(
 ipcMain.handle(
   "create-upload-context",
   async (_event, userId: string, userEmail: string, folderPath: string) => {
+    // Get the base URL from the store in main process
+    const serverUrl =
+      store.get("server-url") || process.env.VITE_WEB_APP_PROXY_URL;
+    console.log("[main] Using server URL for upload context:", serverUrl);
+
     const contextDetails = await createUploadContext(
       userId,
       userEmail,
-      folderPath
+      folderPath,
+      serverUrl
     );
     return contextDetails;
   }
@@ -315,9 +331,11 @@ ipcMain.handle(
       const uploadWorkerPool = workerpool.pool(uploadWorker, {
         maxWorkers: 2,
       });
-
+      const serverUrl =
+        store.get("server-url") || process.env.VITE_WEB_APP_PROXY_URL;
+      console.log("[main] Using server URL for upload context:", serverUrl);
       // Execute upload with progress handling
-      const result = await uploadWorkerPool.exec("uploadFiles", [files], {
+      const result = await uploadWorkerPool.exec("uploadFiles", [files, serverUrl], {
         on: (payload) => {
           if (
             payload.type === "progress" &&
@@ -351,10 +369,10 @@ ipcMain.handle(
 ipcMain.handle(
   "list-files",
   async (_event, dirPath: string, contextId: number) => {
-    const workerPath = path.join(__dirname, "fileWorker.js");
-    const listedFilesWorker = path.join(__dirname, "listAndClassifyFiles.js");
-    const fileRecordWorker = path.join(__dirname, "fileRecordWorker.js");
-    const criParserWorker = path.join(__dirname, "criParserWorker.js");
+    const workerPath = getWorkerPath("fileWorker");
+    const listedFilesWorker = getWorkerPath("listAndClassifyFiles");
+    const fileRecordWorker = getWorkerPath("fileRecordWorker");
+    const criParserWorker = getWorkerPath("criParserWorker");
 
     const pool = workerpool.pool(workerPath, { maxWorkers: 2 });
     const listedFilesWorkerPool = workerpool.pool(listedFilesWorker, {
@@ -377,10 +395,13 @@ ipcMain.handle(
       console.log(
         `Starting file processing for directory: ${dirPath} with contextId: ${contextId}`
       );
+      const serverUrl =
+        store.get("server-url") || process.env.VITE_WEB_APP_PROXY_URL;
+      console.log("[main] Using server URL for upload context:", serverUrl);
 
       const listedFiles = await listedFilesWorkerPool.exec(
         "listAndClassifyFiles",
-        [dirPath, contextId]
+        [dirPath, contextId, serverUrl]
       );
 
       console.log(

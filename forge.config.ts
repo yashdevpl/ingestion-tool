@@ -22,27 +22,27 @@ const plugins: ForgeConfig["plugins"] = [
       },
       {
         entry: "src/workers/fileWorker.ts",
-        config: "vite.main.config.ts",
+        config: "vite.worker.config.ts",
         target: "main",
       },
       {
         entry: "src/workers/criParserWorker.ts",
-        config: "vite.main.config.ts",
+        config: "vite.worker.config.ts",
         target: "main",
       },
       {
         entry: "src/workers/fileRecordWorker.ts",
-        config: "vite.main.config.ts",
+        config: "vite.worker.config.ts",
         target: "main",
       },
       {
         entry: "src/workers/uploadWorker.ts",
-        config: "vite.main.config.ts",
+        config: "vite.worker.config.ts",
         target: "main",
       },
       {
         entry: "src/workers/listAndClassifyFiles.ts",
-        config: "vite.main.config.ts",
+        config: "vite.worker.config.ts",
         target: "main",
       },
     ],

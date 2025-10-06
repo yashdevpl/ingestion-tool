@@ -145,7 +145,7 @@ async function uploadBatch(
   }
 }
 
-export async function uploadFiles(files: UploadFile[]) {
+export async function uploadFiles(files: UploadFile[], serverUrl: string) {
   const audioFiles = files.filter((f) => f.type === "audio");
   const smsFiles = files.filter((f) => f.type === "text");
 
@@ -161,8 +161,11 @@ export async function uploadFiles(files: UploadFile[]) {
   // Process audio files in batches
   for (let i = 0; i < audioFiles.length; i += BATCH_SIZE) {
     const batch = audioFiles.slice(i, i + BATCH_SIZE);
-    const baseUrl = getBaseUrl();
-    const result = await uploadBatch(batch, `${baseUrl}/api/ingestion`, "call");
+    const result = await uploadBatch(
+      batch,
+      `${serverUrl}/api/ingestion`,
+      "call"
+    );
 
     if (result.success) {
       results.successful.push(...result.fileIds);
@@ -194,8 +197,11 @@ export async function uploadFiles(files: UploadFile[]) {
   // Process SMS files in batches
   for (let i = 0; i < smsFiles.length; i += BATCH_SIZE) {
     const batch = smsFiles.slice(i, i + BATCH_SIZE);
-    const baseUrl = getBaseUrl();
-    const result = await uploadBatch(batch, `${baseUrl}/api/ingestion/sms`, "sms");
+    const result = await uploadBatch(
+      batch,
+      `${serverUrl}/api/ingestion/sms`,
+      "sms"
+    );
 
     if (result.success) {
       results.successful.push(...result.fileIds);
