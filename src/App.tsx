@@ -1,15 +1,13 @@
-import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { FiltersProvider } from "./context/filters-context";
-import { UploadStatusProvider } from "./context/upload-status-context";
-import Login from "./Login";
+import { Toaster } from "./components/ui/toaster";
+import { AuthProvider } from "./context/auth-context";
+import { Routing } from "./routing/Routes";
 
 createRoot(document.body).render(
-  <StrictMode>
-    <FiltersProvider>
-      <UploadStatusProvider>
-        <Login />
-      </UploadStatusProvider>
-    </FiltersProvider>
-  </StrictMode>
+  <>
+    <AuthProvider>
+      <Toaster />
+      <Routing />
+    </AuthProvider>
+  </>
 );

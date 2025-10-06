@@ -1,3 +1,4 @@
+import { fileStatus } from "../components/upload-form/CompactFileItem";
 import type { FileRecord } from "./common";
 
 export interface UploadProgress {
@@ -20,6 +21,7 @@ export interface UploadContext {
 }
 
 export interface FileListResult {
+  allFiles: FileRecord[];
   validFiles: FileRecord[];
   newFileRecords: FileRecord[];
   smsFiles: FileRecord[];
@@ -27,12 +29,37 @@ export interface FileListResult {
   audioCriFiles: FileRecord[];
   audioMetadataFiles: FileRecord[];
   totalFiles?: number;
+  validationErrors?: Array<{
+    fileName: string;
+    fileType: "audio" | "text" | "system";
+    criFileName?: string;
+    errors: string[];
+    isValid: boolean;
+  }>;
+  error?: string;
+}
+
+export interface FileStatusItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  uploadDate?: string;
+  ingestionDate?: string;
+  status: fileStatus;
+  fileType: string;
+  errorMessage?: string;
 }
 
 export interface ElectronBridge {
+  get: (key: string) => Promise<any>;
+  set: (key: string, value: any) => Promise<void>;
   selectDirectory: () => Promise<string | null>;
   listFiles: (dirPath: string, contextId: number) => Promise<FileListResult>;
-  createUploadContext: () => Promise<UploadContext>;
+  createUploadContext: (
+    userId: string,
+    userEmail: string,
+    folderPath: string
+  ) => Promise<UploadContext>;
   uploadFiles: (
     files: FileRecord[],
     contextId: number
@@ -46,4 +73,10 @@ export interface ElectronBridge {
   getPendingOAuthCallback: () => Promise<string | null>;
   onClearAuthOnClose: (callback: () => void) => void;
   removeClearAuthListener: () => void;
+  reUploadFile: (
+    fileId: string,
+    fileName: string,
+    status: string,
+    dirPath: string
+  ) => Promise<any>;
 }

@@ -20,6 +20,31 @@ const plugins: ForgeConfig["plugins"] = [
         config: "vite.preload.config.ts",
         target: "preload",
       },
+      {
+        entry: "src/workers/fileWorker.ts",
+        config: "vite.worker.config.ts",
+        target: "main",
+      },
+      {
+        entry: "src/workers/criParserWorker.ts",
+        config: "vite.worker.config.ts",
+        target: "main",
+      },
+      {
+        entry: "src/workers/fileRecordWorker.ts",
+        config: "vite.worker.config.ts",
+        target: "main",
+      },
+      {
+        entry: "src/workers/uploadWorker.ts",
+        config: "vite.worker.config.ts",
+        target: "main",
+      },
+      {
+        entry: "src/workers/listAndClassifyFiles.ts",
+        config: "vite.worker.config.ts",
+        target: "main",
+      },
     ],
     renderer: [
       {
